@@ -1,0 +1,257 @@
+# OpenHands Deployment Plan - Continue Setup
+
+## Quick Context for New Agent
+
+The user is building a **"Tony Stark style" AI coding agent** for their cold email agency. They've forked OpenHands to `Inbound-Revenue/agentrepo` and have a Hetzner server ready. Phase 1 (server foundation) is complete. You need to continue with Phase 2.
+
+---
+
+## Server Access
+
+| Item | Value |
+|------|-------|
+| **Server IP** | 5.161.96.149 |
+| **SSH User** | root |
+| **SSH Password** | ZtehFarenwarMk3 |
+| **Provider** | Hetzner Cloud (CX22 - 2 vCPU, 4GB RAM, 40GB disk) |
+
+To SSH in:
+```bash
+sshpass -p 'ZtehFarenwarMk3' ssh root@5.161.96.149 'YOUR_COMMAND_HERE'
+```
+
+---
+
+## API Keys
+
+| Service | Key |
+|---------|-----|
+| **Anthropic** | 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 |
+| **LLM Model to Use** | Claude Opus 4 (user's preference for best coding capability) |
+
+---
+
+## The User's Goal
+
+### Business Context
+- Runs a **cold email agency**
+- Currently manages **3 Replit projects** (Node.js) connected to a shared **Supabase** database
+- Tired of being limited to Replit's agent
+
+### What They Want to Build
+A custom AI coding assistant with:
+
+1. **"Tony Stark" Interface**:
+   - Left 1/3: Chat with AI agent
+   - Right 2/3: Visual display of agent activity (terminal, data grids, browser)
+
+2. **Core Use Cases**:
+   - Edit codebases (their Node.js projects)
+   - Query/manage Supabase data (e.g., "find leads not contacted in 7 days")
+   - Help with email tasks
+   - Eventually: editable data grids showing query results
+
+3. **Technical Approach**:
+   - Use OpenHands as the foundation (already forked to `Inbound-Revenue/agentrepo`)
+   - Store conversations in Supabase (custom ConversationStore - to be built later)
+   - Start with vanilla OpenHands, customize incrementally
+
+---
+
+## What's Already Done (Phase 1) ✅
+
+On the Hetzner server (5.161.96.149):
+
+| Task | Status |
+|------|--------|
+| System packages updated | ✅ Complete |
+| Docker installed | ✅ v29.1.5 |
+| Docker Compose installed | ✅ v5.0.1 |
+| Firewall configured (UFW) | ✅ Ports 22, 80, 443, 3000 open |
+
+---
+
+## What Needs to Be Done
+
+### Phase 2: OpenHands Installation (DO THIS NEXT)
+
+1. **Clone the user's fork to the server**
+   ```bash
+   cd /opt
+   git clone https://github.com/Inbound-Revenue/agentrepo.git openhands
+   cd openhands
+   ```
+
+2. **Pull Docker images** (~3-4GB, may take 5-10 min)
+   ```bash
+   docker pull docker.openhands.dev/openhands/runtime:1.1-nikolaik
+   ```
+
+3. **Create environment config** at `/opt/openhands/.env`:
+   ```bash
+   LLM_API_KEY=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
+   LLM_MODEL=anthropic/claude-opus-4-20250514
+   SANDBOX_RUNTIME_CONTAINER_IMAGE=docker.openhands.dev/openhands/runtime:1.1-nikolaik
+   WORKSPACE_BASE=/opt/openhands/workspace
+   FILE_STORE=local
+   FILE_STORE_PATH=/root/.openhands
+   ```
+
+4. **Start OpenHands**
+   ```bash
+   docker compose up -d
+   ```
+
+5. **Verify it's running**
+   - Should be accessible at: http://5.161.96.149:3000
+
+---
+
+### Phase 3: Production Setup (AFTER PHASE 2)
+
+1. **Install Nginx** as reverse proxy
+2. **Setup SSL certificate** (if user has a domain)
+3. **Configure auto-start on reboot** (systemd service)
+4. **Basic security hardening** (fail2ban, SSH keys)
+
+---
+
+### Phase 4: Supabase Integration (FUTURE)
+
+The user wants conversations stored in their Supabase instead of local files.
+
+**OpenHands Storage Architecture**:
+- Uses a `ConversationStore` abstraction
+- Default is `FileConversationStore` (saves to `~/.openhands/sessions/`)
+- Can be replaced with custom implementation
+
+**To implement**:
+
+1. Create Supabase tables:
+```sql
+CREATE TABLE conversations (
+    id SERIAL PRIMARY KEY,
+    conversation_id TEXT UNIQUE NOT NULL,
+    user_id TEXT,
+    title TEXT,
+    selected_repository TEXT,
+    llm_model TEXT,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    last_updated_at TIMESTAMPTZ,
+    accumulated_cost DECIMAL(10,4) DEFAULT 0,
+    prompt_tokens INTEGER DEFAULT 0,
+    completion_tokens INTEGER DEFAULT 0,
+    total_tokens INTEGER DEFAULT 0
+);
+
+CREATE TABLE conversation_events (
+    id SERIAL PRIMARY KEY,
+    conversation_id TEXT REFERENCES conversations(conversation_id),
+    event_index INTEGER NOT NULL,
+    event_type TEXT NOT NULL,
+    event_data JSONB NOT NULL,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(conversation_id, event_index)
+);
+
+CREATE INDEX idx_conversations_user ON conversations(user_id);
+CREATE INDEX idx_conversations_created ON conversations(created_at DESC);
+CREATE INDEX idx_events_conversation ON conversation_events(conversation_id);
+```
+
+2. Create custom `SupabaseConversationStore` class at:
+   `openhands/storage/conversation/supabase_conversation_store.py`
+
+3. Configure via environment:
+   ```bash
+   SUPABASE_URL=https://xxx.supabase.co
+   SUPABASE_KEY=xxx
+   CONVERSATION_STORE_CLASS=openhands.storage.conversation.supabase_conversation_store.SupabaseConversationStore
+   ```
+
+---
+
+### Phase 5: UI Customization (FUTURE)
+
+Transform the UI to the "Tony Stark" vision:
+
+**Current OpenHands layout**: ~50/50 split chat/workspace
+
+**Target layout**: 
+- Left 1/3: Chat
+- Right 2/3: Visual activity panel (terminal, data grids, browser)
+
+**Files to modify**:
+```
+frontend/src/
+├── routes/              # Main page layouts
+├── components/          # Reusable UI components
+│   ├── chat/           # Chat interface
+│   ├── terminal/       # Terminal view
+│   └── browser/        # Browser preview
+└── hooks/              # React hooks for state
+```
+
+**Key additions**:
+- Data grid component for displaying Supabase query results visually
+- Eventually make data grids editable
+
+---
+
+## Repository Structure (Key Directories)
+
+```
+Inbound-Revenue/agentrepo/
+├── frontend/           # React UI (Vite + TypeScript + Tailwind)
+│   ├── src/           # Customization target
+│   └── package.json   
+├── openhands/         # Python backend
+│   ├── server/        # FastAPI REST API
+│   ├── runtime/       # Sandbox execution engine
+│   ├── storage/       # Where ConversationStore lives
+│   ├── agenthub/      # Agent implementations
+│   ├── llm/           # LLM integrations
+│   └── controller/    # Agent orchestration
+├── containers/        # Docker configurations
+├── enterprise/        # Multi-user features (needs license after 1 month)
+└── docker-compose.yml # Deployment config
+```
+
+---
+
+## License Notes
+
+- **MIT License** for core `openhands` and `frontend` - ✅ Free commercial use
+- **Enterprise License** for `enterprise/` directory - Needs paid license after 1 month trial
+- For single user (current use case), MIT-licensed core is sufficient
+
+---
+
+## Cost Estimate
+
+| Item | Monthly Cost |
+|------|-------------|
+| Hetzner CX22 | ~$5 |
+| Anthropic API (Opus) | $20-100 (usage-based, Opus is pricier) |
+| Domain (optional) | ~$1 |
+| **Total** | **$25-105/month** |
+
+---
+
+## Immediate Next Step
+
+**Run Phase 2**: Clone repo, pull images, configure, start OpenHands.
+
+After Phase 2, the user will be able to:
+- Access OpenHands at http://5.161.96.149:3000
+- Chat with Claude Opus 4
+- Have the agent write/edit code
+- See terminal output and file changes in real-time
+
+---
+
+## Questions the User May Have Answered
+
+- **Why not Railway?** OpenHands requires Docker-in-Docker (spawns sandbox containers). Railway doesn't provide Docker socket access.
+- **Why Hetzner?** Cheaper than DigitalOcean (~$5 vs $24 for similar specs), full Docker access.
+- **Why fork OpenHands?** To customize it for their specific use case while being able to pull upstream updates.
