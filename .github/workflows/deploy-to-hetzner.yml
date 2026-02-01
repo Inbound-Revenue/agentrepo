@@ -23,11 +23,12 @@ jobs:
             git reset --hard origin/main
             echo "Updated /opt/agentrepo to latest main"
             
+            # Restart frontend to pick up new code
+            systemctl restart openhands-frontend
+            echo "Restarted openhands-frontend service"
+            
             # Restart preview-manager to pick up any changes
             systemctl restart preview-manager
             echo "Restarted preview-manager service"
-            
-            # Optional: If you want to also restart the main OpenHands instance
-            # docker compose down && docker compose up -d
             
             echo "=== Deployment complete ==="
