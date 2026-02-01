@@ -1,0 +1,33 @@
+name: Deploy to Hetzner
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Hetzner Server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: 5.161.96.149
+          username: root
+          password: ${{ secrets.HETZNER_SSH_PASSWORD }}
+          script: |
+            echo "=== Starting deployment ==="
+            
+            # Update the main agentrepo
+            cd /opt/agentrepo
+            git fetch origin main
+            git reset --hard origin/main
+            echo "Updated /opt/agentrepo to latest main"
+            
+            # Restart preview-manager to pick up any changes
+            systemctl restart preview-manager
+            echo "Restarted preview-manager service"
+            
+            # Optional: If you want to also restart the main OpenHands instance
+            # docker compose down && docker compose up -d
+            
+            echo "=== Deployment complete ==="

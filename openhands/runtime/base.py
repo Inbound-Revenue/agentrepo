@@ -3,10 +3,8 @@ import atexit
 import copy
 import json
 import os
-import random
 import shlex
 import shutil
-import string
 import tempfile
 from abc import abstractmethod
 from pathlib import Path
@@ -446,12 +444,6 @@ class Runtime(FileEditRuntimeMixin):
 
         dir_name = selected_repository.split('/')[-1]
 
-        # Generate a random branch name to avoid conflicts
-        random_str = ''.join(
-            random.choices(string.ascii_lowercase + string.digits, k=8)
-        )
-        openhands_workspace_branch = f'openhands-workspace-{random_str}'
-
         repo_path = self.workspace_root / dir_name
         quoted_repo_path = shlex.quote(str(repo_path))
         quoted_remote_repo_url = shlex.quote(remote_repo_url)
@@ -460,10 +452,12 @@ class Runtime(FileEditRuntimeMixin):
         clone_command = f'git clone {quoted_remote_repo_url} {quoted_repo_path}'
 
         # Checkout to appropriate branch
+        # If a specific branch is selected, use it; otherwise stay on the default branch (main)
+        # This allows direct commits to main for CI/CD workflows
         checkout_command = (
             f'git checkout {selected_branch}'
             if selected_branch
-            else f'git checkout -b {openhands_workspace_branch}'
+            else 'git checkout main || git checkout master'  # Stay on default branch
         )
 
         clone_action = CmdRunAction(command=clone_command)
