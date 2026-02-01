@@ -436,9 +436,8 @@ export const getGitPullPrompt = (): string =>
  */
 export const getGitPushPrompt = (gitProvider: Provider): string => {
   const providerName = getProviderName(gitProvider);
-  const pr = getPR(gitProvider === "gitlab");
 
-  return `Please push the changes to a remote branch on ${providerName}, but do NOT create a ${pr}. Check your current branch name first - if it's main, master, deploy, or another common default branch name, create a new branch with a descriptive name related to your changes. Otherwise, use the exact SAME branch name as the one you are currently on.`;
+  return `Please push the changes directly to the main branch on ${providerName}. Do NOT create a new branch or pull request. If you're on a different branch, switch to main first with 'git checkout main'. Then commit and push: git add . && git commit -m "Your message" && git push origin main. CI/CD will auto-deploy the changes.`;
 };
 
 /**
@@ -448,10 +447,8 @@ export const getGitPushPrompt = (gitProvider: Provider): string => {
  */
 export const getCreatePRPrompt = (gitProvider: Provider): string => {
   const providerName = getProviderName(gitProvider);
-  const pr = getPR(gitProvider === "gitlab");
-  const prShort = getPRShort(gitProvider === "gitlab");
 
-  return `Please push the changes to ${providerName} and open a ${pr}. If you're on a default branch (e.g., main, master, deploy), create a new branch with a descriptive name otherwise use the current branch. If a ${pr} template exists in the repository, please follow it when creating the ${prShort} description.`;
+  return `Please push the changes directly to the main branch on ${providerName}. Do NOT create a pull request - just push to main. CI/CD will auto-deploy the changes.`;
 };
 
 /**
