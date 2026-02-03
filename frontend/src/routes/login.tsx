@@ -28,12 +28,18 @@ export default function LoginPage() {
     authUrl: config.data?.AUTH_URL,
   });
 
+  // Treat as OSS mode if config failed to load (API unreachable) or explicitly set to OSS
+  const isOssMode =
+    config.data?.APP_MODE === "oss" ||
+    (config.isError && !config.isLoading) ||
+    (!config.isLoading && !config.data);
+
   // Redirect OSS mode users to home
   React.useEffect(() => {
-    if (!config.isLoading && config.data?.APP_MODE === "oss") {
+    if (!config.isLoading && isOssMode) {
       navigate("/", { replace: true });
     }
-  }, [config.isLoading, config.data?.APP_MODE, navigate]);
+  }, [config.isLoading, isOssMode, navigate]);
 
   // Redirect authenticated users away from login page
   React.useEffect(() => {
@@ -51,7 +57,7 @@ export default function LoginPage() {
   }
 
   // Don't render login content if user is authenticated or in OSS mode
-  if (isAuthed || config.data?.APP_MODE === "oss") {
+  if (isAuthed || isOssMode) {
     return null;
   }
 
