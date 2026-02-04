@@ -209,7 +209,9 @@ class AppConversationServiceBase(AppConversationService, ABC):
         # Run autostart commands if configured
         task.status = AppConversationStartTaskStatus.RUNNING_AUTOSTART
         yield task
-        await self.maybe_run_autostart_commands(workspace)
+        await self.maybe_run_autostart_commands(
+            workspace, task.request.selected_repository
+        )
 
     async def _configure_git_user_settings(
         self,
@@ -373,6 +375,7 @@ class AppConversationServiceBase(AppConversationService, ABC):
     async def maybe_run_autostart_commands(
         self,
         workspace: AsyncRemoteWorkspace,
+        selected_repository: str | None = None,
     ):
         """Run autostart commands if .openhands/autostart.yaml exists in the workspace.
 
@@ -387,7 +390,14 @@ class AppConversationServiceBase(AppConversationService, ABC):
               working_dir: "/workspace/project"  # optional
         ```
         """
-        autostart_config_path = f'{workspace.working_dir}/.openhands/autostart.yaml'
+        # Determine the repo root directory (same logic as skill_loader)
+        if selected_repository:
+            repo_name = selected_repository.split('/')[-1]
+            repo_root = f'{workspace.working_dir}/{repo_name}'
+        else:
+            repo_root = workspace.working_dir
+
+        autostart_config_path = f'{repo_root}/.openhands/autostart.yaml'
         _logger.info(f'Checking for autostart config at: {autostart_config_path}')
 
         # Check if autostart.yaml exists by trying to read it
