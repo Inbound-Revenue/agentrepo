@@ -11,6 +11,7 @@ if TYPE_CHECKING:
     import httpx
 
 import base62
+import yaml
 
 from openhands.app_server.app_conversation.app_conversation_models import (
     AgentType,
@@ -205,6 +206,11 @@ class AppConversationServiceBase(AppConversationService, ABC):
             workspace.working_dir,
         )
 
+        # Run autostart commands if configured
+        task.status = AppConversationStartTaskStatus.RUNNING_AUTOSTART
+        yield task
+        await self.maybe_run_autostart_commands(workspace)
+
     async def _configure_git_user_settings(
         self,
         workspace: AsyncRemoteWorkspace,
@@ -363,6 +369,111 @@ class AppConversationServiceBase(AppConversationService, ABC):
             return
 
         _logger.info('Git pre-commit hook installed successfully')
+
+    async def maybe_run_autostart_commands(
+        self,
+        workspace: AsyncRemoteWorkspace,
+    ):
+        """Run autostart commands if .openhands/autostart.yaml exists in the workspace.
+
+        The autostart.yaml file should have the following structure:
+        ```yaml
+        autostart:
+          enabled: true
+          commands:
+            - name: "Start dev server"
+              command: "npm run dev"
+              background: true
+              working_dir: "/workspace/project"  # optional
+        ```
+        """
+        autostart_config_path = f'{workspace.working_dir}/.openhands/autostart.yaml'
+        _logger.info(f'Checking for autostart config at: {autostart_config_path}')
+
+        # Check if autostart.yaml exists by trying to read it
+        try:
+            result = await workspace.execute_command(
+                f'cat {autostart_config_path}',
+                workspace.working_dir,
+                timeout=30,
+            )
+
+            if result.exit_code != 0:
+                _logger.info('No autostart.yaml found, skipping autostart')
+                return
+
+            config_content = result.stdout
+            if not config_content:
+                _logger.info('autostart.yaml is empty, skipping autostart')
+                return
+
+            # Parse the YAML config
+            try:
+                config = yaml.safe_load(config_content)
+            except yaml.YAMLError as e:
+                _logger.error(f'Failed to parse autostart.yaml: {e}')
+                return
+
+            if not config or 'autostart' not in config:
+                _logger.info('No autostart section in config, skipping')
+                return
+
+            autostart_config = config['autostart']
+
+            # Check if autostart is enabled
+            if not autostart_config.get('enabled', True):
+                _logger.info('Autostart is disabled in config')
+                return
+
+            commands = autostart_config.get('commands', [])
+            if not commands:
+                _logger.info('No autostart commands configured')
+                return
+
+            _logger.info(f'Running {len(commands)} autostart command(s)')
+
+            # Execute each command
+            for i, cmd_config in enumerate(commands):
+                cmd_name = cmd_config.get('name', f'Command {i + 1}')
+                cmd = cmd_config.get('command')
+
+                if not cmd:
+                    _logger.warning(f'Skipping autostart command {cmd_name}: no command specified')
+                    continue
+
+                # Get optional parameters
+                background = cmd_config.get('background', False)
+                working_dir = cmd_config.get('working_dir', workspace.working_dir)
+                timeout = cmd_config.get('timeout', 300)  # 5 minute default
+
+                _logger.info(f'Autostart: Running "{cmd_name}" (background={background})')
+
+                if background:
+                    # Run in background with nohup
+                    bg_cmd = f'nohup {cmd} > /tmp/autostart_{i}.log 2>&1 &'
+                    result = await workspace.execute_command(
+                        bg_cmd,
+                        working_dir,
+                        timeout=30,
+                    )
+                else:
+                    result = await workspace.execute_command(
+                        cmd,
+                        working_dir,
+                        timeout=timeout,
+                    )
+
+                if result.exit_code != 0 and not background:
+                    _logger.warning(
+                        f'Autostart command "{cmd_name}" failed with exit code {result.exit_code}: {result.stderr}'
+                    )
+                else:
+                    _logger.info(f'Autostart command "{cmd_name}" completed successfully')
+
+            _logger.info('Autostart commands completed')
+
+        except Exception as e:
+            _logger.error(f'Error running autostart commands: {e}')
 
     def _create_condenser(
         self,

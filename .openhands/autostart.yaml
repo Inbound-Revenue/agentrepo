@@ -2,21 +2,11 @@
 # This file defines commands to run automatically when a conversation starts.
 # Commands are executed in order before the agent begins.
 
-startup:
-  # Install frontend dependencies (only if node_modules doesn't exist)
-  - name: "Install frontend dependencies"
-    command: "cd frontend && npm install"
-    condition: "! -d frontend/node_modules"
-    timeout: 300
-
-  # Start the backend server
-  - name: "Start backend server"
-    command: "cd /workspace/project && poetry run uvicorn openhands.server.listen:app --host 0.0.0.0 --port $WORKER_1 --reload"
-    background: true
-    timeout: 60
-
-  # Start the frontend dev server
-  - name: "Start frontend server"
-    command: "cd /workspace/project/frontend && npm run dev -- --host 0.0.0.0 --port $WORKER_2"
-    background: true
-    timeout: 60
+autostart:
+  enabled: true
+  commands:
+    # Start a simple Python HTTP server on port 8011 for preview
+    - name: "Start preview server"
+      command: "cd /workspace && python -m http.server 8011"
+      background: true
+      timeout: 30
