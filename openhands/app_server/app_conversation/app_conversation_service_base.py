@@ -459,21 +459,23 @@ class AppConversationServiceBase(AppConversationService, ABC):
                 _logger.info(f'Autostart: Running "{cmd_name}" (background={background})')
 
                 if background:
-                    # Run in background using tmux new-window to ensure process persists
-                    # This creates a detached tmux window that survives after the command returns
-                    safe_name = cmd_name.replace('"', '\\"').replace("'", "\\'")[:20]
-                    bg_cmd = f'tmux new-window -d -n "autostart_{i}" "cd {working_dir} && {cmd}; sleep infinity"'
+                    # Run in background using setsid to create a new session
+                    # This ensures the process survives after the parent shell exits
+                    log_file = f'/tmp/autostart_{i}.log'
+                    bg_cmd = f'setsid sh -c "cd {working_dir} && {cmd} > {log_file} 2>&1" &'
                     result = await workspace.execute_command(
                         bg_cmd,
                         working_dir,
                         timeout=30,
                     )
+                    # Give the process a moment to start
+                    await workspace.execute_command('sleep 1', working_dir, timeout=5)
                     if result.exit_code != 0:
                         _logger.warning(
                             f'Autostart command "{cmd_name}" failed to start: {result.stderr}'
                         )
                     else:
-                        _logger.info(f'Autostart command "{cmd_name}" started in background')
+                        _logger.info(f'Autostart command "{cmd_name}" started in background (log: {log_file})')
                 else:
                     result = await workspace.execute_command(
                         cmd,
