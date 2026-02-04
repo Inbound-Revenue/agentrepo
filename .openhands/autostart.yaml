@@ -5,8 +5,24 @@
 autostart:
   enabled: true
   commands:
-    # Start a simple Python HTTP server on port 8011 for preview
-    - name: "Start preview server"
-      command: "cd /workspace && python -m http.server 8011"
+    # 1. Install Python dependencies
+    - name: "Install Python deps"
+      command: "cd /workspace/project/agentrepo && poetry install --no-interaction"
+      background: false
+      timeout: 300
+
+    # 2. Install Frontend dependencies
+    - name: "Install Frontend deps"
+      command: "cd /workspace/project/agentrepo/frontend && npm install"
+      background: false
+      timeout: 300
+
+    # 3. Start Backend on port 8011
+    - name: "Start Backend"
+      command: "cd /workspace/project/agentrepo && poetry run uvicorn openhands.server.listen:app --host 0.0.0.0 --port 8011"
       background: true
-      timeout: 30
+
+    # 4. Start Frontend on port 8012
+    - name: "Start Frontend"
+      command: "cd /workspace/project/agentrepo/frontend && VITE_BACKEND_HOST=0.0.0.0:8011 npm run dev -- --port 8012 --host 0.0.0.0"
+      background: true
