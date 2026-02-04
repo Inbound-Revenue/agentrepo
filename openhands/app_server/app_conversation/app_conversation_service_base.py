@@ -459,26 +459,33 @@ class AppConversationServiceBase(AppConversationService, ABC):
                 _logger.info(f'Autostart: Running "{cmd_name}" (background={background})')
 
                 if background:
-                    # Run in background with nohup
-                    bg_cmd = f'nohup {cmd} > /tmp/autostart_{i}.log 2>&1 &'
+                    # Run in background using tmux new-window to ensure process persists
+                    # This creates a detached tmux window that survives after the command returns
+                    safe_name = cmd_name.replace('"', '\\"').replace("'", "\\'")[:20]
+                    bg_cmd = f'tmux new-window -d -n "autostart_{i}" "cd {working_dir} && {cmd}; sleep infinity"'
                     result = await workspace.execute_command(
                         bg_cmd,
                         working_dir,
                         timeout=30,
                     )
+                    if result.exit_code != 0:
+                        _logger.warning(
+                            f'Autostart command "{cmd_name}" failed to start: {result.stderr}'
+                        )
+                    else:
+                        _logger.info(f'Autostart command "{cmd_name}" started in background')
                 else:
                     result = await workspace.execute_command(
                         cmd,
                         working_dir,
                         timeout=timeout,
                     )
-
-                if result.exit_code != 0 and not background:
-                    _logger.warning(
-                        f'Autostart command "{cmd_name}" failed with exit code {result.exit_code}: {result.stderr}'
-                    )
-                else:
-                    _logger.info(f'Autostart command "{cmd_name}" completed successfully')
+                    if result.exit_code != 0:
+                        _logger.warning(
+                            f'Autostart command "{cmd_name}" failed with exit code {result.exit_code}: {result.stderr}'
+                        )
+                    else:
+                        _logger.info(f'Autostart command "{cmd_name}" completed successfully')
 
             _logger.info('Autostart commands completed')
 
