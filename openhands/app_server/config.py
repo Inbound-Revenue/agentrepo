@@ -235,6 +235,9 @@ def config_from_env() -> AppServerConfig:
             # Container runtime for Docker-in-Docker support (e.g., 'sysbox-runc')
             if os.getenv('SANDBOX_RUNTIME'):
                 docker_sandbox_kwargs['runtime'] = os.environ['SANDBOX_RUNTIME']
+            # Privileged mode for Docker-in-Docker support
+            if os.getenv('SANDBOX_PRIVILEGED', '').lower() in ('true', '1', 'yes'):
+                docker_sandbox_kwargs['privileged'] = True
             config.sandbox = DockerSandboxServiceInjector(**docker_sandbox_kwargs)
 
     if config.sandbox_spec is None:

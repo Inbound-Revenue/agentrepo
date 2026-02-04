@@ -83,6 +83,7 @@ class DockerSandboxService(SandboxService):
     docker_client: docker.DockerClient = field(default_factory=get_docker_client)
     startup_grace_seconds: int = STARTUP_GRACE_SECONDS
     runtime: str | None = None  # Container runtime (e.g., 'sysbox-runc' for Docker-in-Docker support)
+    privileged: bool = False  # Run container in privileged mode for Docker-in-Docker support
 
     def _find_unused_port(self) -> int:
         """Find an unused port on the host machine."""
@@ -370,6 +371,8 @@ class DockerSandboxService(SandboxService):
                 extra_hosts=self.extra_hosts if self.extra_hosts else None,
                 # Container runtime - use sysbox-runc for Docker-in-Docker support
                 runtime=self.runtime,
+                # Privileged mode for Docker-in-Docker support
+                privileged=self.privileged,
             )
 
             sandbox_info = await self._container_to_sandbox_info(container)
@@ -526,7 +529,15 @@ class DockerSandboxServiceInjector(SandboxServiceInjector):
         description=(
             'Container runtime to use for sandboxes. Set to "sysbox-runc" to enable '
             'Docker-in-Docker support (requires sysbox to be installed on the host). '
-            'Configure via OH_SANDBOX_RUNTIME environment variable.'
+            'Configure via SANDBOX_RUNTIME environment variable.'
+        ),
+    )
+    privileged: bool = Field(
+        default=False,
+        description=(
+            'Run sandbox containers in privileged mode for Docker-in-Docker support. '
+            'WARNING: This gives containers full host access. '
+            'Configure via SANDBOX_PRIVILEGED environment variable.'
         ),
     )
 
@@ -556,4 +567,5 @@ class DockerSandboxServiceInjector(SandboxServiceInjector):
                 extra_hosts=self.extra_hosts,
                 startup_grace_seconds=self.startup_grace_seconds,
                 runtime=self.runtime,
+                privileged=self.privileged,
             )
