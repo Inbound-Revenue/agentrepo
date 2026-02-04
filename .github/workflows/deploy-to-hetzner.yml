@@ -23,6 +23,10 @@ jobs:
             git reset --hard origin/main
             echo "Updated /opt/agentrepo to latest main"
             
+            # Restart backend to pick up new code (important for autostart feature)
+            systemctl restart openhands-backend
+            echo "Restarted openhands-backend service"
+            
             # Restart frontend to pick up new code
             systemctl restart openhands-frontend
             echo "Restarted openhands-frontend service"
