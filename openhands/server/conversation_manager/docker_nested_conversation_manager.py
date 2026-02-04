@@ -212,7 +212,7 @@ class DockerNestedConversationManager(ConversationManager):
             await call_sync_from_async(runtime.setup_initial_env)
 
             # Execute autostart commands if .openhands/autostart.yaml exists
-            await self._execute_autostart_commands(runtime, sid)
+            await self._execute_autostart_commands(runtime, sid, settings)
 
             async with httpx.AsyncClient(
                 verify=httpx_verify_option(),
@@ -297,7 +297,7 @@ class DockerNestedConversationManager(ConversationManager):
             self._starting_conversation_ids.discard(sid)
 
     async def _execute_autostart_commands(
-        self, runtime: DockerRuntime, sid: str
+        self, runtime: DockerRuntime, sid: str, settings: Settings
     ) -> None:
         """Execute autostart commands from .openhands/autostart.yaml if it exists.
 
@@ -312,7 +312,19 @@ class DockerNestedConversationManager(ConversationManager):
             logger.debug('Autostart: No workspace path configured, skipping')
             return
 
-        config_path = f'{workspace_path}/.openhands/autostart.yaml'
+        # If a repository is selected, look in the repo subdirectory
+        # The repo is cloned to workspace_path/<repo_name>/
+        selected_repository = None
+        if isinstance(settings, ConversationInitData):
+            selected_repository = settings.selected_repository
+
+        if selected_repository:
+            repo_name = selected_repository.split('/')[-1]
+            config_path = f'{workspace_path}/{repo_name}/.openhands/autostart.yaml'
+        else:
+            config_path = f'{workspace_path}/.openhands/autostart.yaml'
+
+        logger.info(f'Autostart: Looking for config at {config_path}')
 
         try:
             # Read the autostart config file
