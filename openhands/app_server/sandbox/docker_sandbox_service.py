@@ -82,6 +82,7 @@ class DockerSandboxService(SandboxService):
     extra_hosts: dict[str, str] = field(default_factory=dict)
     docker_client: docker.DockerClient = field(default_factory=get_docker_client)
     startup_grace_seconds: int = STARTUP_GRACE_SECONDS
+    runtime: str | None = None  # Container runtime (e.g., 'sysbox-runc' for Docker-in-Docker support)
 
     def _find_unused_port(self) -> int:
         """Find an unused port on the host machine."""
@@ -367,6 +368,8 @@ class DockerSandboxService(SandboxService):
                 # Allow agent-server containers to resolve host.docker.internal
                 # and other custom hostnames for LAN deployments
                 extra_hosts=self.extra_hosts if self.extra_hosts else None,
+                # Container runtime - use sysbox-runc for Docker-in-Docker support
+                runtime=self.runtime,
             )
 
             sandbox_info = await self._container_to_sandbox_info(container)
@@ -518,6 +521,14 @@ class DockerSandboxServiceInjector(SandboxServiceInjector):
             'before it is considered an error'
         ),
     )
+    runtime: str | None = Field(
+        default=None,
+        description=(
+            'Container runtime to use for sandboxes. Set to "sysbox-runc" to enable '
+            'Docker-in-Docker support (requires sysbox to be installed on the host). '
+            'Configure via OH_SANDBOX_RUNTIME environment variable.'
+        ),
+    )
 
     async def inject(
         self, state: InjectorState, request: Request | None = None
@@ -544,4 +555,5 @@ class DockerSandboxServiceInjector(SandboxServiceInjector):
                 max_num_sandboxes=self.max_num_sandboxes,
                 extra_hosts=self.extra_hosts,
                 startup_grace_seconds=self.startup_grace_seconds,
+                runtime=self.runtime,
             )
