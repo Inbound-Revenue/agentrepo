@@ -232,6 +232,9 @@ def config_from_env() -> AppServerConfig:
                         )
                 if mounts:
                     docker_sandbox_kwargs['mounts'] = mounts
+            # Container runtime for Docker-in-Docker support (e.g., 'sysbox-runc')
+            if os.getenv('SANDBOX_RUNTIME'):
+                docker_sandbox_kwargs['runtime'] = os.environ['SANDBOX_RUNTIME']
             config.sandbox = DockerSandboxServiceInjector(**docker_sandbox_kwargs)
 
     if config.sandbox_spec is None:
