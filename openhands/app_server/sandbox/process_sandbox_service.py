@@ -227,6 +227,22 @@ class ProcessSandboxService(SandboxService):
             created_at=process_info.created_at,
         )
 
+    def _get_agent_server_url(self, sandbox: SandboxInfo) -> str:
+        """Get agent server URL without Docker hostname replacement.
+
+        ProcessSandboxService runs agent servers as subprocesses in the same
+        environment (same container or host), so localhost correctly refers
+        to the local machine. No replacement to host.docker.internal is needed.
+        """
+        if not sandbox.exposed_urls:
+            raise SandboxError(f'No exposed URLs for sandbox: {sandbox.id}')
+
+        for exposed_url in sandbox.exposed_urls:
+            if exposed_url.name == AGENT_SERVER:
+                return exposed_url.url  # No replacement needed
+
+        raise SandboxError(f'No agent server URL found for sandbox: {sandbox.id}')
+
     async def search_sandboxes(
         self,
         page_id: str | None = None,
