@@ -205,10 +205,14 @@ class ProcessSandboxService(SandboxService):
                 url = f'http://127.0.0.1:{process_info.port}{self.health_check_path}'
                 response = await self.httpx_client.get(url, timeout=5.0)
                 if response.status_code == 200:
+                    # Use 127.0.0.1 instead of localhost to prevent
+                    # replace_localhost_hostname_for_docker() from rewriting
+                    # the URL to host.docker.internal (which would fail since
+                    # the agent_server subprocess runs in the same container)
                     exposed_urls = [
                         ExposedUrl(
                             name=AGENT_SERVER,
-                            url=f'http://localhost:{process_info.port}',
+                            url=f'http://127.0.0.1:{process_info.port}',
                             port=process_info.port,
                         ),
                     ]
