@@ -25,7 +25,7 @@ autostart:
 
     # 4. Install Playwright browsers (required for browser functionality)
     - name: "Install Playwright"
-      command: "cd /workspace/project/agentrepo && poetry run playwright install chromium"
+      command: "cd /workspace/project/agentrepo && PLAYWRIGHT_BROWSERS_PATH=/home/openhands/.cache/playwright poetry run playwright install chromium"
       background: false
       timeout: 300
 
