@@ -23,12 +23,18 @@ autostart:
       background: false
       timeout: 300
 
-    # 4. Start Backend on port 8011 (LOCAL runtime - no Docker needed)
+    # 4. Install Playwright browsers (required for browser functionality)
+    - name: "Install Playwright"
+      command: "cd /workspace/project/agentrepo && poetry run playwright install chromium"
+      background: false
+      timeout: 300
+
+    # 5. Start Backend on port 8011 (LOCAL runtime - no Docker needed)
     - name: "Start Backend"
       command: "cd /workspace/project/agentrepo && RUNTIME=local poetry run uvicorn openhands.server.listen:app --host 0.0.0.0 --port 8011"
       background: true
 
-    # 5. Start Frontend dev server on port 8012 (for hot reload during development)
+    # 6. Start Frontend dev server on port 8012 (for hot reload during development)
     - name: "Start Frontend Dev"
       command: "cd /workspace/project/agentrepo/frontend && VITE_BACKEND_HOST=0.0.0.0:8011 npm run dev -- --port 8012 --host 0.0.0.0"
       background: true
