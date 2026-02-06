@@ -23,6 +23,11 @@ jobs:
             git reset --hard origin/main
             echo "Updated /opt/agentrepo to latest main"
             
+            # Rebuild frontend (required for frontend changes to take effect)
+            cd /opt/agentrepo/frontend
+            npm run build
+            echo "Rebuilt frontend"
+            
             # Restart backend to pick up new code (important for autostart feature)
             systemctl restart openhands-backend
             echo "Restarted openhands-backend service"
