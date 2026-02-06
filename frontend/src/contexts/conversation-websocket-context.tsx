@@ -159,11 +159,11 @@ export function ConversationWebSocketProvider({
   );
 
   // Build WebSocket URL from props
-  // Only build URL if we have both conversationId and conversationUrl
-  // This prevents connection attempts during task polling phase
+  // conversationUrl can be null for ProcessSandbox deployments,
+  // in which case buildWebSocketUrl falls back to window.location.host
   const wsUrl = useMemo(() => {
-    // Don't attempt connection if we're missing required data
-    if (!conversationId || !conversationUrl) {
+    // Don't attempt connection if we're missing conversationId
+    if (!conversationId) {
       return null;
     }
     return buildWebSocketUrl(conversationId, conversationUrl);
@@ -585,11 +585,12 @@ export function ConversationWebSocketProvider({
         removeErrorMessage(); // Clear any previous error messages on successful connection
 
         // Fetch expected event count for history loading detection
-        if (conversationId && conversationUrl) {
+        // conversationUrl can be null (falls back to window.location)
+        if (conversationId) {
           try {
             const count = await EventService.getEventCount(
               conversationId,
-              conversationUrl,
+              conversationUrl ?? "", // empty string triggers window.location fallback
               sessionApiKey,
             );
             setExpectedEventCountMain(count);
