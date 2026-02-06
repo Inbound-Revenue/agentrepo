@@ -336,12 +336,19 @@ async def _search_events_v1(
         async with httpx.AsyncClient(verify=httpx_verify_option()) as client:
             response = await client.get(sdk_url, params=params, headers=headers)
             response.raise_for_status()
-            sdk_events = response.json()
+            sdk_response = response.json()
 
-        # SDK returns a list of events
-        events = sdk_events if isinstance(sdk_events, list) else []
-        has_more = len(events) > limit
-        if has_more:
+        # SDK returns {"items": [...], "next_page_id": ...}
+        if isinstance(sdk_response, dict):
+            events = sdk_response.get('items', [])
+            # has_more is true if there's a next_page_id or if we got more than limit
+            has_more = sdk_response.get('next_page_id') is not None or len(events) > limit
+        else:
+            # Fallback for unexpected response format
+            events = sdk_response if isinstance(sdk_response, list) else []
+            has_more = len(events) > limit
+
+        if len(events) > limit:
             events = events[:limit]
 
         return {
