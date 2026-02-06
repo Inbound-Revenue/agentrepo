@@ -2,19 +2,20 @@
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from openhands.core.logger import openhands_logger as logger
+from openhands.integrations.provider import PROVIDER_TOKEN_TYPE
 from openhands.integrations.service_types import ProviderType
 from openhands.server.shared import config
+from openhands.server.user_auth import get_provider_tokens, get_user_id
 from openhands.storage.data_models.saved_repo import PrewarmedConversation, SavedRepository
 from openhands.storage.repos.file_repos_store import FileReposStore
 
 
-# Note: saved-repos endpoints don't require session API key auth
-# since they're used for local deployment repo management
+# Note: saved-repos endpoints capture user credentials for pre-warming
 app = APIRouter(prefix='/api')
 
 
@@ -165,50 +166,65 @@ async def get_saved_repo(
     },
 )
 async def add_saved_repo(
-    request: AddRepoRequest,
+    request_body: AddRepoRequest,
+    http_request: Request,
     repos_store: FileReposStore = Depends(get_repos_store),
 ) -> SavedRepoResponse:
     """Add a new repository to the saved list.
     
     After adding, the ConversationPoolManager will automatically start
-    pre-warming conversations for this repo.
+    pre-warming REAL conversations for this repo using the caller's credentials.
+    This means full runtime containers will be started with the repo cloned
+    and autostart commands executed.
     """
     try:
         from openhands.server.conversation_pool_manager import get_pool_manager
         
+        # Get user credentials for pre-warming
+        # These are used to start real conversations with proper authentication
+        user_id = await get_user_id(http_request)
+        provider_tokens = await get_provider_tokens(http_request)
+        
+        logger.info(f'Adding repo {request_body.repo_full_name} for user {user_id} with provider tokens: {list(provider_tokens.keys()) if provider_tokens else "none"}')
+        
         # Validate git provider
         try:
-            git_provider = ProviderType(request.git_provider)
+            git_provider = ProviderType(request_body.git_provider)
         except ValueError:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f'Invalid git provider: {request.git_provider}',
+                detail=f'Invalid git provider: {request_body.git_provider}',
             )
 
         # Validate pool_size
-        if request.pool_size < 1 or request.pool_size > 10:
+        if request_body.pool_size < 1 or request_body.pool_size > 10:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail='pool_size must be between 1 and 10',
             )
 
         repo = SavedRepository(
-            repo_full_name=request.repo_full_name,
-            branch=request.branch,
+            repo_full_name=request_body.repo_full_name,
+            branch=request_body.branch,
             git_provider=git_provider,
             added_at=datetime.now(timezone.utc),
-            pool_size=request.pool_size,
+            pool_size=request_body.pool_size,
             prewarmed_conversations=[],
         )
         await repos_store.add_repo(repo)
-        logger.info(f'Added saved repo: {request.repo_full_name} with pool_size={request.pool_size}')
+        logger.info(f'Added saved repo: {request_body.repo_full_name} with pool_size={request_body.pool_size}')
         
-        # Trigger pre-warming for this repo
+        # Trigger pre-warming for this repo WITH user credentials
+        # This allows us to start REAL conversations with full runtime setup
         pool_manager = await get_pool_manager()
-        await pool_manager.prewarm_for_repo(request.repo_full_name)
+        await pool_manager.prewarm_for_repo(
+            request_body.repo_full_name,
+            user_id=user_id,
+            provider_tokens=provider_tokens,
+        )
         
         # Reload repo to get updated prewarmed_conversations
-        repo = await repos_store.get_repo(request.repo_full_name)
+        repo = await repos_store.get_repo(request_body.repo_full_name)
         
         return repo_to_response(repo)
     except HTTPException:

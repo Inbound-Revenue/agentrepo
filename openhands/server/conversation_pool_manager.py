@@ -2,6 +2,9 @@
 
 This module provides the ConversationPoolManager which maintains ready-to-use
 conversations for each saved repository, enabling instant conversation starts.
+
+The pre-warming process starts REAL conversations that go through the full
+initialization including runtime creation, repo cloning, and autostart commands.
 """
 
 from __future__ import annotations
@@ -10,9 +13,10 @@ import asyncio
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from openhands.core.logger import openhands_logger as logger
+from openhands.integrations.provider import PROVIDER_TOKEN_TYPE
 from openhands.integrations.service_types import ProviderType
 from openhands.server.shared import config
 from openhands.storage.data_models.saved_repo import PrewarmedConversation, SavedRepository
@@ -28,15 +32,17 @@ class ConversationPoolManager:
     
     This manager:
     - Maintains a pool of ready-to-use conversations per saved repo
+    - Starts REAL conversations with full runtime, repo clone, and autostart
     - Automatically spawns new conversations when pool is depleted
     - Handles invalidation when code changes are detected
-    - Integrates with server startup to pre-warm all saved repos
     """
     
     repos_store: ReposStore | None = None
     _prewarm_tasks: dict[str, asyncio.Task] = field(default_factory=dict)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _initialized: bool = False
+    # Store user credentials for pre-warming (keyed by repo_full_name)
+    _repo_credentials: dict[str, dict[str, Any]] = field(default_factory=dict)
     
     async def initialize(self) -> None:
         """Initialize the pool manager and start pre-warming all saved repos."""
@@ -46,13 +52,9 @@ class ConversationPoolManager:
         logger.info('Initializing ConversationPoolManager')
         self.repos_store = await FileReposStore.get_instance(config, user_id=None)
         
-        # Load all saved repos and start pre-warming
+        # Load all saved repos - pre-warming will happen when credentials are provided
         repos = await self.repos_store.load_all()
-        logger.info(f'Found {len(repos)} saved repositories to pre-warm')
-        
-        for repo in repos:
-            # Don't await - let them run in parallel
-            asyncio.create_task(self._ensure_pool_filled(repo.repo_full_name))
+        logger.info(f'Found {len(repos)} saved repositories (awaiting credentials for pre-warm)')
         
         self._initialized = True
         logger.info('ConversationPoolManager initialized')
@@ -63,6 +65,7 @@ class ConversationPoolManager:
         for task in self._prewarm_tasks.values():
             task.cancel()
         self._prewarm_tasks.clear()
+        self._repo_credentials.clear()
         self._initialized = False
     
     async def _get_repos_store(self) -> ReposStore:
@@ -71,14 +74,41 @@ class ConversationPoolManager:
             self.repos_store = await FileReposStore.get_instance(config, user_id=None)
         return self.repos_store
     
-    async def prewarm_for_repo(self, repo_full_name: str) -> None:
+    def set_credentials_for_repo(
+        self, 
+        repo_full_name: str, 
+        user_id: str | None,
+        provider_tokens: PROVIDER_TOKEN_TYPE | None,
+    ) -> None:
+        """Store credentials for a repo to use during pre-warming.
+        
+        Called when a user adds a repo - we capture their credentials
+        so we can start real conversations in the background.
+        """
+        self._repo_credentials[repo_full_name] = {
+            'user_id': user_id,
+            'provider_tokens': provider_tokens,
+        }
+        logger.info(f'Stored credentials for repo: {repo_full_name}')
+    
+    async def prewarm_for_repo(
+        self, 
+        repo_full_name: str,
+        user_id: str | None = None,
+        provider_tokens: PROVIDER_TOKEN_TYPE | None = None,
+    ) -> None:
         """Start pre-warming conversations for a specific repository.
         
         This is called when:
-        - A new repo is added
+        - A new repo is added (with user credentials)
         - Code changes are detected (after invalidation)
-        - Server starts up
+        - Manually triggered
+        
+        If user_id and provider_tokens are provided, they're stored for future use.
         """
+        if user_id or provider_tokens:
+            self.set_credentials_for_repo(repo_full_name, user_id, provider_tokens)
+        
         logger.info(f'Pre-warming conversations for repo: {repo_full_name}')
         await self._ensure_pool_filled(repo_full_name)
     
@@ -117,74 +147,94 @@ class ConversationPoolManager:
                     break
     
     async def _warm_conversation(self, repo_full_name: str, conversation_id: str) -> None:
-        """Actually warm up a conversation (create it and run autostart).
+        """Actually warm up a conversation by starting a REAL agent session.
         
-        This creates the conversation metadata and starts the agent loop,
-        which will clone the repo and run any autostart commands.
+        This creates a full conversation with:
+        1. Runtime (Docker container)
+        2. Repo cloned into the container
+        3. All autostart.yaml commands executed
+        
+        The conversation will be fully ready when the user claims it.
         """
         try:
-            logger.info(f'Warming conversation {conversation_id} for repo {repo_full_name}')
+            logger.info(f'Starting REAL warming for conversation {conversation_id} for repo {repo_full_name}')
             
             # Step 1: Initializing
             await self._update_conversation_status(
                 repo_full_name, conversation_id, 'warming', warming_step='initializing'
             )
-            await asyncio.sleep(1)  # Give UI time to show progress
             
             repos_store = await self._get_repos_store()
             repo = await repos_store.get_repo(repo_full_name)
             if not repo:
                 logger.error(f'Repository not found during warming: {repo_full_name}')
+                await self._update_conversation_status(
+                    repo_full_name, conversation_id, 'error', 'Repository not found', warming_step='error'
+                )
+                return
+            
+            # Get stored credentials
+            credentials = self._repo_credentials.get(repo_full_name, {})
+            user_id = credentials.get('user_id')
+            provider_tokens = credentials.get('provider_tokens')
+            
+            if not provider_tokens:
+                logger.warning(f'No credentials stored for {repo_full_name}, falling back to metadata-only warming')
+                # Fall back to just creating metadata (fast but not fully warmed)
+                await self._warm_conversation_metadata_only(repo_full_name, conversation_id, repo)
                 return
             
             # Import here to avoid circular imports
-            from openhands.server.services.conversation_service import initialize_conversation
+            from openhands.server.services.conversation_service import create_new_conversation
             from openhands.storage.data_models.conversation_metadata import ConversationTrigger
             
-            # Step 2: Cloning repo (simulated - actual cloning happens when runtime starts)
+            # Step 2: Starting full conversation (this does EVERYTHING including autostart)
             await self._update_conversation_status(
                 repo_full_name, conversation_id, 'warming', warming_step='cloning_repo'
             )
-            await asyncio.sleep(2)  # Simulate repo cloning time
             
-            # Step 3: Building runtime (simulated)
-            await self._update_conversation_status(
-                repo_full_name, conversation_id, 'warming', warming_step='building_runtime'
-            )
-            await asyncio.sleep(2)  # Simulate runtime building
+            logger.info(f'Creating FULL conversation {conversation_id} with runtime for {repo_full_name}')
             
-            # Step 4: Starting agent
-            await self._update_conversation_status(
-                repo_full_name, conversation_id, 'warming', warming_step='starting_agent'
-            )
-            
-            # Initialize the conversation metadata
-            await initialize_conversation(
-                user_id=None,  # Pre-warmed conversations are not user-specific initially
-                conversation_id=conversation_id,
-                selected_repository=repo.repo_full_name,
-                selected_branch=repo.branch,
-                conversation_trigger=ConversationTrigger.GUI,
-                git_provider=repo.git_provider if isinstance(repo.git_provider, ProviderType) else ProviderType(repo.git_provider),
-            )
-            
-            await asyncio.sleep(1)  # Final setup
-            
-            # Note: We don't start the full agent loop here because that requires
-            # user settings (API keys, etc.). The conversation is "warm" when:
-            # 1. Metadata is created
-            # 2. The conversation can be quickly resumed with user settings
-            # 
-            # For full pre-warming with autostart, we'd need to:
-            # - Store default settings or use service account
-            # - Actually start the runtime and run autostart commands
-            # This is a future enhancement.
-            
-            # Update status to ready
-            await self._update_conversation_status(
-                repo_full_name, conversation_id, 'ready', warming_step='ready'
-            )
-            logger.info(f'Conversation {conversation_id} is ready for repo {repo_full_name}')
+            try:
+                # This will:
+                # 1. Create conversation metadata
+                # 2. Start the runtime (Docker container)
+                # 3. Clone the repository
+                # 4. Run setup scripts
+                # 5. Execute ALL autostart commands
+                await create_new_conversation(
+                    user_id=user_id,
+                    git_provider_tokens=provider_tokens,
+                    custom_secrets=None,
+                    selected_repository=repo.repo_full_name,
+                    selected_branch=repo.branch,
+                    initial_user_msg=None,  # No initial message - just warm it up
+                    image_urls=None,
+                    replay_json=None,
+                    conversation_instructions=None,
+                    conversation_trigger=ConversationTrigger.GUI,
+                    git_provider=repo.git_provider if isinstance(repo.git_provider, ProviderType) else ProviderType(repo.git_provider),
+                    conversation_id=conversation_id,
+                )
+                
+                # Update status to ready - the conversation is now FULLY warmed
+                await self._update_conversation_status(
+                    repo_full_name, conversation_id, 'ready', warming_step='ready'
+                )
+                logger.info(f'Conversation {conversation_id} is FULLY ready for repo {repo_full_name}')
+                
+            except Exception as e:
+                error_msg = str(e)
+                logger.error(f'Failed to create full conversation {conversation_id}: {error_msg}')
+                
+                # Check if it's a settings/auth error - these are expected if user hasn't configured LLM
+                if 'Settings not found' in error_msg or 'LLM' in error_msg or 'API key' in error_msg:
+                    logger.info(f'Settings not configured, falling back to metadata-only warming')
+                    await self._warm_conversation_metadata_only(repo_full_name, conversation_id, repo)
+                else:
+                    await self._update_conversation_status(
+                        repo_full_name, conversation_id, 'error', error_msg, warming_step='error'
+                    )
             
         except Exception as e:
             logger.error(f'Error warming conversation {conversation_id}: {e}')
@@ -194,6 +244,40 @@ class ConversationPoolManager:
         finally:
             # Clean up task reference
             self._prewarm_tasks.pop(conversation_id, None)
+    
+    async def _warm_conversation_metadata_only(
+        self, 
+        repo_full_name: str, 
+        conversation_id: str,
+        repo: SavedRepository,
+    ) -> None:
+        """Fallback: Create only conversation metadata (fast, but not fully warmed).
+        
+        This is used when we don't have user credentials or settings.
+        The conversation will need to do the full startup when claimed.
+        """
+        from openhands.server.services.conversation_service import initialize_conversation
+        from openhands.storage.data_models.conversation_metadata import ConversationTrigger
+        
+        await self._update_conversation_status(
+            repo_full_name, conversation_id, 'warming', warming_step='creating_metadata'
+        )
+        
+        # Just create the metadata
+        await initialize_conversation(
+            user_id=None,
+            conversation_id=conversation_id,
+            selected_repository=repo.repo_full_name,
+            selected_branch=repo.branch,
+            conversation_trigger=ConversationTrigger.GUI,
+            git_provider=repo.git_provider if isinstance(repo.git_provider, ProviderType) else ProviderType(repo.git_provider),
+        )
+        
+        # Mark as ready (though it's only metadata-ready, not runtime-ready)
+        await self._update_conversation_status(
+            repo_full_name, conversation_id, 'ready', warming_step='ready'
+        )
+        logger.info(f'Conversation {conversation_id} metadata ready (runtime will start on claim)')
     
     async def _update_conversation_status(
         self, 
