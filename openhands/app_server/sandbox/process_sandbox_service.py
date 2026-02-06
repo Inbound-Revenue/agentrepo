@@ -131,13 +131,20 @@ class ProcessSandboxService(SandboxService):
         )
 
         try:
+            # Log to file instead of PIPE to prevent buffer overflow blocking
+            # When using subprocess.PIPE without reading, the buffer fills up
+            # and the process blocks on any write to stdout/stderr
+            log_path = os.path.join('/tmp', f'agent_server_{sandbox_id}.log')
+            log_file = open(log_path, 'w')
+            _logger.info(f'Agent server logs will be written to {log_path}')
+
             # Start the process
             process = subprocess.Popen(
                 cmd,
                 env=env,
                 cwd=working_dir,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
             )
 
             # Wait a moment for the process to start
@@ -145,8 +152,11 @@ class ProcessSandboxService(SandboxService):
 
             # Check if process is still running
             if process.poll() is not None:
-                stdout, stderr = process.communicate()
-                raise SandboxError(f'Agent process failed to start: {stderr.decode()}')
+                # Read from log file for error message
+                log_file.close()
+                with open(log_path, 'r') as f:
+                    log_content = f.read()
+                raise SandboxError(f'Agent process failed to start: {log_content}')
 
             return process
 
