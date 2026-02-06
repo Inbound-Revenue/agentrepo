@@ -327,6 +327,14 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                 self.httpx_client,
             )
 
+            # Start the agent loop (required for SDK agent_server)
+            run_response = await self.httpx_client.post(
+                f'{agent_server_url}/api/conversations/{info.id}/run',
+                headers={'X-Session-API-Key': sandbox.session_api_key},
+                timeout=self.sandbox_startup_timeout,
+            )
+            run_response.raise_for_status()
+
             # Update the start task
             task.status = AppConversationStartTaskStatus.READY
             task.app_conversation_id = info.id
