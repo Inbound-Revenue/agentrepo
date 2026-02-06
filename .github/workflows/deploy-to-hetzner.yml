@@ -15,20 +15,48 @@ jobs:
           username: root
           password: ${{ secrets.HETZNER_SSH_PASSWORD }}
           script: |
+            set -e
             echo "=== Starting deployment ==="
             
-            # Update the main agentrepo
             cd /opt/agentrepo
+            
+            # Save current commit to detect what changed
+            OLD_COMMIT=$(git rev-parse HEAD)
+            
+            # Update the main agentrepo
             git fetch origin main
             git reset --hard origin/main
-            echo "Updated /opt/agentrepo to latest main"
+            NEW_COMMIT=$(git rev-parse HEAD)
+            echo "Updated /opt/agentrepo from $OLD_COMMIT to $NEW_COMMIT"
             
-            # Rebuild frontend (required for frontend changes to take effect)
+            # Check what files changed
+            CHANGED_FILES=$(git diff --name-only $OLD_COMMIT $NEW_COMMIT 2>/dev/null || echo "")
+            
+            # Install frontend dependencies only if package-lock.json changed
+            if echo "$CHANGED_FILES" | grep -q "frontend/package-lock.json"; then
+              echo "package-lock.json changed - running npm install..."
+              cd /opt/agentrepo/frontend
+              npm install
+              cd /opt/agentrepo
+            else
+              echo "package-lock.json unchanged - skipping npm install"
+            fi
+            
+            # Install backend dependencies only if poetry.lock changed
+            if echo "$CHANGED_FILES" | grep -q "poetry.lock"; then
+              echo "poetry.lock changed - running poetry install..."
+              cd /opt/agentrepo
+              poetry install --no-interaction
+            else
+              echo "poetry.lock unchanged - skipping poetry install"
+            fi
+            
+            # Always rebuild frontend (in case any frontend code changed)
             cd /opt/agentrepo/frontend
             npm run build
             echo "Rebuilt frontend"
             
-            # Restart backend to pick up new code (important for autostart feature)
+            # Restart backend to pick up new code
             systemctl restart openhands-backend
             echo "Restarted openhands-backend service"
             
