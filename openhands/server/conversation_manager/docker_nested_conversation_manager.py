@@ -19,16 +19,14 @@ from typing import Any, cast
 import docker
 import httpx
 import socketio
-import yaml
 from docker.models.containers import Container
 
 from openhands.controller.agent import Agent
 from openhands.core.config import OpenHandsConfig
 from openhands.core.config.llm_config import LLMConfig
 from openhands.core.logger import openhands_logger as logger
-from openhands.events.action import CmdRunAction, FileReadAction, MessageAction
+from openhands.events.action import MessageAction
 from openhands.events.nested_event_store import NestedEventStore
-from openhands.events.observation import CmdOutputObservation, FileReadObservation
 from openhands.events.stream import EventStream
 from openhands.experiments.experiment_manager import ExperimentManagerImpl
 from openhands.integrations.provider import PROVIDER_TOKEN_TYPE, ProviderHandler
@@ -301,126 +299,21 @@ class DockerNestedConversationManager(ConversationManager):
     ) -> None:
         """Execute autostart commands from .openhands/autostart.yaml if it exists.
 
-        This method checks for an autostart configuration file in the workspace
-        and executes the defined startup commands before the agent begins.
-        Commands marked as 'background: true' will be run with nohup/disown
-        to prevent them from being stopped by terminal signals.
+        Delegates to the shared utility in utils.py.
         """
-        # The workspace path inside the container
-        workspace_path = runtime.config.workspace_mount_path_in_sandbox
-        if not workspace_path:
-            logger.debug('Autostart: No workspace path configured, skipping')
-            return
+        from openhands.server.conversation_manager.utils import (
+            execute_autostart_commands,
+        )
 
-        # If a repository is selected, look in the repo subdirectory
-        # The repo is cloned to workspace_path/<repo_name>/
         selected_repository = None
         if isinstance(settings, ConversationInitData):
             selected_repository = settings.selected_repository
 
-        if selected_repository:
-            repo_name = selected_repository.split('/')[-1]
-            config_path = f'{workspace_path}/{repo_name}/.openhands/autostart.yaml'
-        else:
-            config_path = f'{workspace_path}/.openhands/autostart.yaml'
-
-        logger.info(f'Autostart: Looking for config at {config_path}')
-
-        try:
-            # Read the autostart config file
-            read_action = FileReadAction(path=config_path)
-            read_obs = await call_sync_from_async(runtime.read, read_action)
-
-            if not isinstance(read_obs, FileReadObservation):
-                logger.debug(f'Autostart: No config found at {config_path}')
-                return
-
-            if not read_obs.content or read_obs.content.startswith('ERROR'):
-                logger.debug(f'Autostart: Could not read {config_path}')
-                return
-
-            # Parse YAML config
-            config = yaml.safe_load(read_obs.content)
-            if not config or 'startup' not in config:
-                logger.debug('Autostart: No startup commands in config')
-                return
-
-            logger.info(
-                f'Autostart: Found {len(config["startup"])} startup commands',
-                extra={'session_id': sid},
-            )
-
-            # Execute each startup command
-            for cmd_config in config['startup']:
-                name = cmd_config.get('name', 'unnamed')
-                command = cmd_config.get('command', '')
-                condition = cmd_config.get('condition')
-                background = cmd_config.get('background', False)
-                timeout = cmd_config.get('timeout', 120)
-
-                if not command:
-                    logger.warning(f'Autostart: Skipping {name} - no command specified')
-                    continue
-
-                # Check condition if specified
-                if condition:
-                    check_cmd = f'[ {condition} ] && echo CONDITION_MET || echo CONDITION_NOT_MET'
-                    check_action = CmdRunAction(
-                        command=check_cmd, blocking=True, hidden=True
-                    )
-                    check_action.set_hard_timeout(30)
-                    check_obs = await call_sync_from_async(runtime.run, check_action)
-
-                    if isinstance(check_obs, CmdOutputObservation):
-                        if 'CONDITION_NOT_MET' in check_obs.content:
-                            logger.info(
-                                f'Autostart: Skipping "{name}" - condition not met',
-                                extra={'session_id': sid},
-                            )
-                            continue
-
-                # Prepare the command
-                if background:
-                    # Use nohup and disown to prevent SIGTSTP from stopping the process
-                    # Also redirect output to a log file for debugging
-                    safe_name = name.replace(' ', '_').replace('/', '_')
-                    log_file = f'/tmp/autostart_{safe_name}.log'
-                    command = f'nohup {command} > {log_file} 2>&1 & disown'
-
-                logger.info(
-                    f'Autostart: Running "{name}"',
-                    extra={'session_id': sid, 'command': command},
-                )
-
-                # Execute the command
-                run_action = CmdRunAction(command=command, blocking=True, hidden=True)
-                run_action.set_hard_timeout(timeout)
-                run_obs = await call_sync_from_async(runtime.run, run_action)
-
-                if isinstance(run_obs, CmdOutputObservation):
-                    if run_obs.exit_code != 0 and not background:
-                        logger.warning(
-                            f'Autostart: "{name}" exited with code {run_obs.exit_code}',
-                            extra={'session_id': sid},
-                        )
-                    else:
-                        logger.info(
-                            f'Autostart: "{name}" completed successfully',
-                            extra={'session_id': sid},
-                        )
-                else:
-                    logger.warning(
-                        f'Autostart: "{name}" returned unexpected observation type',
-                        extra={'session_id': sid},
-                    )
-
-        except yaml.YAMLError as e:
-            logger.warning(f'Autostart: Failed to parse YAML config: {e}')
-        except Exception as e:
-            logger.warning(
-                f'Autostart: Execution failed: {e}',
-                extra={'session_id': sid},
-            )
+        await execute_autostart_commands(
+            runtime=runtime,
+            sid=sid,
+            selected_repository=selected_repository,
+        )
 
     async def send_to_event_stream(self, connection_id: str, data: dict):
         # Not supported - clients should connect directly to the nested server!

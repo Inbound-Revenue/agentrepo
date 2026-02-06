@@ -386,6 +386,17 @@ class AgentSession:
         await call_sync_from_async(self.runtime.maybe_run_setup_script)
         await call_sync_from_async(self.runtime.maybe_setup_git_hooks)
 
+        # Execute autostart commands if .openhands/autostart.yaml exists
+        from openhands.server.conversation_manager.utils import (
+            execute_autostart_commands,
+        )
+
+        await execute_autostart_commands(
+            runtime=self.runtime,
+            sid=self.sid,
+            selected_repository=selected_repository,
+        )
+
         self.logger.debug(
             f'Runtime initialized with plugins: {[plugin.name for plugin in self.runtime.plugins]}'
         )
