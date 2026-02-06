@@ -23,6 +23,7 @@ from fastapi import (
 from fastapi.responses import JSONResponse
 
 import openhands.agenthub  # noqa F401 (we import this to get the agents registered)
+from openhands.core.logger import openhands_logger as logger
 from openhands.app_server import v1_router
 from openhands.app_server.config import get_app_lifespan_service
 from openhands.integrations.service_types import AuthenticationError
@@ -30,12 +31,14 @@ from openhands.server.routes.conversation import app as conversation_api_router
 from openhands.server.routes.feedback import app as feedback_api_router
 from openhands.server.routes.files import app as files_api_router
 from openhands.server.routes.git import app as git_api_router
+from openhands.server.routes.github_webhook import app as github_webhook_router
 from openhands.server.routes.health import add_health_endpoints
 from openhands.server.routes.manage_conversations import (
     app as manage_conversation_api_router,
 )
 from openhands.server.routes.mcp import mcp_server
 from openhands.server.routes.public import app as public_api_router
+from openhands.server.routes.saved_repos import app as saved_repos_router
 from openhands.server.routes.secrets import app as secrets_router
 from openhands.server.routes.security import app as security_api_router
 from openhands.server.routes.settings import app as settings_router
@@ -62,8 +65,25 @@ def combine_lifespans(*lifespans):
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncIterator[None]:
+    from openhands.server.conversation_pool_manager import (
+        initialize_pool_manager,
+        shutdown_pool_manager,
+    )
+    
     async with conversation_manager:
+        # Initialize the conversation pool manager for pre-warming
+        try:
+            await initialize_pool_manager()
+        except Exception as e:
+            logger.warning(f'Failed to initialize ConversationPoolManager: {e}')
+        
         yield
+        
+        # Shutdown the pool manager
+        try:
+            await shutdown_pool_manager()
+        except Exception as e:
+            logger.warning(f'Error shutting down ConversationPoolManager: {e}')
 
 
 lifespans = [_lifespan, mcp_app.lifespan]
@@ -97,6 +117,8 @@ app.include_router(conversation_api_router)
 app.include_router(manage_conversation_api_router)
 app.include_router(settings_router)
 app.include_router(secrets_router)
+app.include_router(saved_repos_router)
+app.include_router(github_webhook_router)
 if server_config.app_mode == AppMode.OPENHANDS:
     app.include_router(git_api_router)
 if server_config.enable_v1:
