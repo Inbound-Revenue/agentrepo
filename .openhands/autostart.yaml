@@ -1,6 +1,10 @@
 # OpenHands Autostart Configuration
 # This file defines commands to run automatically when a conversation starts.
 # Commands are executed in order before the agent begins.
+#
+# IMPORTANT: Use $APP_PORT_1 and $APP_PORT_2 environment variables for ports!
+# These are dynamically allocated by the Docker runtime and exposed externally.
+# Hardcoded ports (like 8011, 8012) won't be accessible from outside the container.
 
 autostart:
   enabled: true
@@ -29,12 +33,12 @@ autostart:
       background: false
       timeout: 300
 
-    # 5. Start Backend on port 8011 (LOCAL runtime - no Docker needed)
+    # 5. Start Backend on APP_PORT_1 (LOCAL runtime - no Docker needed)
     - name: "Start Backend"
-      command: "cd /workspace/project/agentrepo && RUNTIME=local poetry run uvicorn openhands.server.listen:app --host 0.0.0.0 --port 8011"
+      command: "cd /workspace/project/agentrepo && RUNTIME=local poetry run uvicorn openhands.server.listen:app --host 0.0.0.0 --port $APP_PORT_1"
       background: true
 
-    # 6. Start Frontend dev server on port 8012 (for hot reload during development)
+    # 6. Start Frontend dev server on APP_PORT_2
     - name: "Start Frontend Dev"
-      command: "cd /workspace/project/agentrepo/frontend && VITE_BACKEND_HOST=0.0.0.0:8011 npm run dev -- --port 8012 --host 0.0.0.0"
+      command: "cd /workspace/project/agentrepo/frontend && VITE_BACKEND_HOST=0.0.0.0:$APP_PORT_1 npm run dev -- --port $APP_PORT_2 --host 0.0.0.0"
       background: true
