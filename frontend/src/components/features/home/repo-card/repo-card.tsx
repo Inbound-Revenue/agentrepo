@@ -24,8 +24,9 @@ const warmingStepLabels: Record<string, string> = {
   queued: "Queued",
   initializing: "Initializing",
   cloning_repo: "Cloning repo",
-  building_runtime: "Building runtime",
-  starting_agent: "Starting agent",
+  building_runtime: "Building container",
+  starting_agent: "Running autostart",
+  creating_metadata: "Creating metadata",
   ready: "Ready",
   error: "Error",
 };

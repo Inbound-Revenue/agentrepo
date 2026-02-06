@@ -59,31 +59,39 @@ async def execute_autostart_commands(
         read_obs = await call_sync_from_async(runtime.read, read_action)
 
         if not isinstance(read_obs, FileReadObservation):
-            logger.debug(f'Autostart: No config found at {config_path}')
+            logger.info(f'Autostart: No config found at {config_path} (got {type(read_obs).__name__})')
             return
 
         if not read_obs.content or read_obs.content.startswith('ERROR'):
-            logger.debug(f'Autostart: Could not read {config_path}')
+            logger.info(f'Autostart: Could not read {config_path}: {read_obs.content[:100] if read_obs.content else "empty"}')
             return
+
+        logger.info(f'Autostart: Successfully read config file ({len(read_obs.content)} bytes)')
 
         # Parse YAML config
         config = yaml.safe_load(read_obs.content)
         if not config:
-            logger.debug('Autostart: Empty config file')
+            logger.info('Autostart: Empty config file after parsing')
             return
 
         # Support both 'startup' (legacy) and 'autostart.commands' (new) formats
         commands = None
         if 'startup' in config:
             commands = config['startup']
+            logger.info(f'Autostart: Found legacy startup format with {len(commands)} commands')
         elif 'autostart' in config and isinstance(config['autostart'], dict):
             autostart_config = config['autostart']
             # Check if enabled (default True if not specified)
             if autostart_config.get('enabled', True):
                 commands = autostart_config.get('commands', [])
+                logger.info(f'Autostart: Found new autostart format with {len(commands) if commands else 0} commands, enabled={autostart_config.get("enabled", True)}')
+            else:
+                logger.info('Autostart: Config found but autostart.enabled=false')
+        else:
+            logger.info(f'Autostart: Config has neither startup nor autostart key. Keys: {list(config.keys())}')
 
         if not commands:
-            logger.debug('Autostart: No startup commands in config')
+            logger.info('Autostart: No startup commands to execute')
             return
 
         logger.info(

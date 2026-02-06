@@ -198,10 +198,12 @@ class ConversationPoolManager:
             try:
                 # This will:
                 # 1. Create conversation metadata
-                # 2. Start the runtime (Docker container)
+                # 2. Start the runtime (Docker container) in background
                 # 3. Clone the repository
                 # 4. Run setup scripts
                 # 5. Execute ALL autostart commands
+                # NOTE: create_new_conversation returns immediately after scheduling
+                # the background task, so we need to wait for the runtime to be ready
                 await create_new_conversation(
                     user_id=user_id,
                     git_provider_tokens=provider_tokens,
@@ -216,6 +218,10 @@ class ConversationPoolManager:
                     git_provider=repo.git_provider if isinstance(repo.git_provider, ProviderType) else ProviderType(repo.git_provider),
                     conversation_id=conversation_id,
                 )
+                
+                # Wait for the runtime to actually be ready
+                # create_new_conversation returns immediately, but runtime init happens in background
+                await self._wait_for_runtime_ready(repo_full_name, conversation_id)
                 
                 # Update status to ready - the conversation is now FULLY warmed
                 await self._update_conversation_status(
@@ -245,6 +251,69 @@ class ConversationPoolManager:
             # Clean up task reference
             self._prewarm_tasks.pop(conversation_id, None)
     
+    async def _wait_for_runtime_ready(
+        self, 
+        repo_full_name: str, 
+        conversation_id: str,
+        timeout_seconds: int = 600,  # 10 minute timeout for full warmup
+        poll_interval: float = 5.0,
+    ) -> None:
+        """Wait for the runtime to be fully initialized including autostart commands.
+        
+        This polls the conversation manager to check if the agent state has moved
+        past LOADING, indicating the runtime is ready for use.
+        """
+        from openhands.core.schema.agent import AgentState
+        from openhands.server.shared import conversation_manager
+        
+        start_time = asyncio.get_event_loop().time()
+        last_step = 'cloning_repo'
+        
+        while True:
+            elapsed = asyncio.get_event_loop().time() - start_time
+            if elapsed > timeout_seconds:
+                logger.warning(f'Timeout waiting for runtime {conversation_id} to be ready after {elapsed:.0f}s')
+                raise TimeoutError(f'Runtime {conversation_id} did not become ready within {timeout_seconds}s')
+            
+            # Check if the session exists and has a runtime
+            session = conversation_manager._local_agent_loops_by_sid.get(conversation_id)
+            
+            if session and session.agent_session:
+                agent_session = session.agent_session
+                
+                # Check runtime status
+                if agent_session.runtime and agent_session.runtime.runtime_initialized:
+                    # Runtime is initialized, now check agent state
+                    if agent_session.controller:
+                        state = agent_session.controller.get_state()
+                        if state and state.agent_state != AgentState.LOADING:
+                            logger.info(f'Runtime {conversation_id} is ready (state: {state.agent_state}, elapsed: {elapsed:.0f}s)')
+                            return
+                        else:
+                            # Still loading but runtime exists
+                            if last_step != 'starting_agent':
+                                last_step = 'starting_agent'
+                                await self._update_conversation_status(
+                                    repo_full_name, conversation_id, 'warming', warming_step='starting_agent'
+                                )
+                    else:
+                        # Runtime exists but no controller yet
+                        if last_step != 'building_runtime':
+                            last_step = 'building_runtime'
+                            await self._update_conversation_status(
+                                repo_full_name, conversation_id, 'warming', warming_step='building_runtime'
+                            )
+                else:
+                    # No runtime yet
+                    if last_step != 'cloning_repo' and elapsed > 10:
+                        last_step = 'cloning_repo'
+                        await self._update_conversation_status(
+                            repo_full_name, conversation_id, 'warming', warming_step='cloning_repo'
+                        )
+            
+            logger.debug(f'Waiting for runtime {conversation_id}... ({elapsed:.0f}s elapsed)')
+            await asyncio.sleep(poll_interval)
+
     async def _warm_conversation_metadata_only(
         self, 
         repo_full_name: str, 
