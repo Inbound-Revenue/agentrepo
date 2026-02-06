@@ -43,6 +43,9 @@ export function GitBranchDropdown({
   const [userManuallyCleared, setUserManuallyCleared] = useState(false);
   const debouncedInputValue = useDebounce(inputValue, 300);
   const menuRef = useRef<HTMLUListElement>(null);
+  
+  // Track previous repository to detect changes
+  const prevRepositoryRef = useRef<string | null>(null);
 
   // Process search input (debounced and filtered)
   const processedSearchInput = useMemo(
@@ -132,13 +135,19 @@ export function GitBranchDropdown({
     inputValue,
   });
 
-  // Reset branch selection when repository changes
+  // Reset branch selection when repository changes (only when actually different)
   useEffect(() => {
-    if (repository) {
-      onBranchSelect(null);
-      setUserManuallyCleared(false); // Reset the manual clear flag when repository changes
+    if (repository !== prevRepositoryRef.current) {
+      prevRepositoryRef.current = repository;
+      if (repository) {
+        // Only reset if the repository actually changed to a different value
+        onBranchSelect(null);
+        setUserManuallyCleared(false);
+        setInputValue("");
+      }
     }
-  }, [repository, onBranchSelect]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repository]); // Intentionally exclude onBranchSelect to prevent infinite loops
 
   // Auto-select default branch when branches are loaded and no branch is selected
   // But only if the user hasn't manually cleared the branch
@@ -147,7 +156,7 @@ export function GitBranchDropdown({
       repository &&
       defaultBranch &&
       !selectedBranch &&
-      !userManuallyCleared && // Don't auto-select if user manually cleared
+      !userManuallyCleared &&
       filteredBranches.length > 0 &&
       !isLoading
     ) {
@@ -159,29 +168,19 @@ export function GitBranchDropdown({
         onBranchSelect(defaultBranchObj);
       }
     }
-  }, [
-    repository,
-    defaultBranch,
-    selectedBranch,
-    userManuallyCleared,
-    filteredBranches,
-    onBranchSelect,
-    isLoading,
-  ]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repository, defaultBranch, filteredBranches, isLoading, userManuallyCleared]); // Exclude selectedBranch and onBranchSelect to prevent loops
 
-  // Reset input when repository changes
+  // Sync input value with selected branch (only when dropdown is closed)
   useEffect(() => {
-    setInputValue("");
-  }, [repository]);
-
-  // Initialize input value when selectedBranch changes (but not when user is typing)
-  useEffect(() => {
-    if (selectedBranch && !isOpen && inputValue !== selectedBranch.name) {
-      setInputValue(selectedBranch.name);
-    } else if (!selectedBranch && !isOpen && inputValue) {
-      setInputValue("");
+    if (!isOpen) {
+      if (selectedBranch) {
+        setInputValue(selectedBranch.name);
+      } else {
+        setInputValue("");
+      }
     }
-  }, [selectedBranch, isOpen, inputValue]);
+  }, [selectedBranch, isOpen]);
 
   const isLoadingState = isLoading || isSearchLoading || isFetchingNextPage;
 
