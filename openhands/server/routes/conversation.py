@@ -315,15 +315,49 @@ async def _search_events_v1(
             conversation_uuid
         )
 
-        if app_conversation is None or app_conversation.conversation_url is None:
+        if app_conversation is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f'Conversation {conversation_id} not found or not ready',
+                detail=f'Conversation {conversation_id} not found',
+            )
+
+        # Get agent_server_url - either from conversation_url or from sandbox
+        agent_server_url = None
+        if app_conversation.conversation_url:
+            # conversation_url is like http://host:port/api/conversations/{id}
+            # We need just http://host:port/api/conversations/{id}
+            agent_server_url = app_conversation.conversation_url
+        else:
+            # For ProcessSandbox, conversation_url is None but we can get
+            # the internal URL from the sandbox service
+            sandbox = await app_conversation_service.sandbox_service.get_sandbox(
+                app_conversation.sandbox_id
+            )
+            if sandbox and sandbox.exposed_urls:
+                from openhands.app_server.sandbox.sandbox_models import AGENT_SERVER
+
+                base_url = next(
+                    (
+                        eu.url
+                        for eu in sandbox.exposed_urls
+                        if eu.name == AGENT_SERVER
+                    ),
+                    None,
+                )
+                if base_url:
+                    agent_server_url = (
+                        f'{base_url}/api/conversations/{conversation_id}'
+                    )
+
+        if not agent_server_url:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f'Conversation {conversation_id} not ready',
             )
 
         # Build SDK events search URL
         # SDK endpoint: GET /api/conversations/{id}/events/search
-        sdk_url = f'{app_conversation.conversation_url}/events/search'
+        sdk_url = f'{agent_server_url}/events/search'
         params = {
             'start_index': start_id,
             'limit': limit + 1,  # Get one extra to check has_more

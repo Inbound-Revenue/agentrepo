@@ -451,7 +451,7 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
         conversation_url = None
         session_api_key = None
         if sandbox and sandbox.exposed_urls:
-            conversation_url = next(
+            agent_server_url = next(
                 (
                     exposed_url.url
                     for exposed_url in sandbox.exposed_urls
@@ -459,8 +459,17 @@ class LiveStatusAppConversationService(AppConversationServiceBase):
                 ),
                 None,
             )
-            if conversation_url:
-                conversation_url += f'/api/conversations/{app_conversation_info.id.hex}'
+            # Only set conversation_url if it's routable from browser
+            # URLs with 127.0.0.1 or localhost are internal-only (ProcessSandbox)
+            # and would fail when browser tries to connect WebSocket
+            if agent_server_url and not any(
+                host in agent_server_url
+                for host in ['127.0.0.1', 'localhost', '0.0.0.0']
+            ):
+                conversation_url = (
+                    agent_server_url
+                    + f'/api/conversations/{app_conversation_info.id.hex}'
+                )
             session_api_key = sandbox.session_api_key
 
         return AppConversation(
