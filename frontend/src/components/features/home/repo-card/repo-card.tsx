@@ -79,6 +79,7 @@ export function RepoCard({ repo, conversations = [], onRemove }: RepoCardProps) 
             readyCount={repo.ready_count}
             warmingCount={repo.warming_count}
             poolSize={repo.pool_size}
+            prewarmedConversations={repo.prewarmed_conversations}
           />
           {onRemove && (
             <button
@@ -150,10 +151,58 @@ export function RepoCard({ repo, conversations = [], onRemove }: RepoCardProps) 
         </div>
       )}
 
-      {/* Pool info (subtle) */}
-      <div className="text-[10px] text-[#6B7280] mt-auto">
-        Pool: {repo.ready_count} ready, {repo.warming_count} warming
+      {/* Pool info - show individual conversations when warming */}
+      <div className="mt-auto">
+        {repo.prewarmed_conversations.length > 0 ? (
+          <div className="flex flex-col gap-1">
+            <span className="text-[10px] text-[#6B7280]">
+              Warming pool ({repo.ready_count}/{repo.pool_size} ready)
+            </span>
+            <div className="flex flex-wrap gap-1">
+              {repo.prewarmed_conversations.map((conv) => (
+                <WarmingConversationBadge key={conv.conversation_id} conv={conv} />
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="text-[10px] text-[#6B7280]">
+            Pool: {repo.ready_count} ready, {repo.warming_count} warming
+          </div>
+        )}
       </div>
+    </div>
+  );
+}
+
+function WarmingConversationBadge({ conv }: { conv: SavedRepository['prewarmed_conversations'][number] }) {
+  const getStatusInfo = () => {
+    switch (conv.status) {
+      case 'ready':
+        return { color: 'bg-green-500', label: '✓', animate: false };
+      case 'warming':
+        const stepLabel = conv.warming_step === 'queued' ? '⏳' 
+          : conv.warming_step === 'initializing' ? '🔄'
+          : conv.warming_step === 'creating_metadata' ? '📝'
+          : '⚙️';
+        return { color: 'bg-yellow-500', label: stepLabel, animate: true };
+      case 'error':
+        return { color: 'bg-red-500', label: '✗', animate: false };
+      default:
+        return { color: 'bg-gray-500', label: '○', animate: false };
+    }
+  };
+
+  const { color, label, animate } = getStatusInfo();
+
+  return (
+    <div 
+      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] ${color}/20 border border-current/20`}
+      title={conv.warming_step || conv.status}
+    >
+      <span className={animate ? 'animate-spin' : ''}>{label}</span>
+      <span className="text-[#A3A3A3] truncate max-w-[60px]">
+        {conv.conversation_id.slice(0, 6)}
+      </span>
     </div>
   );
 }

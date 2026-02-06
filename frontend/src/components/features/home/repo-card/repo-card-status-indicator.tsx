@@ -2,23 +2,34 @@
  * Status indicator for the RepoCard showing pre-warm status
  */
 
+import type { PrewarmedConversation } from "#/api/saved-repos-service/saved-repos.types";
+
 interface RepoCardStatusIndicatorProps {
   readyCount: number;
   warmingCount: number;
   poolSize: number;
+  prewarmedConversations?: PrewarmedConversation[];
 }
+
+const warmingStepLabels: Record<string, string> = {
+  queued: "Queued",
+  initializing: "Initializing...",
+  creating_metadata: "Setting up...",
+  ready: "Ready",
+  error: "Error",
+};
 
 export function RepoCardStatusIndicator({
   readyCount,
   warmingCount,
   poolSize,
+  prewarmedConversations = [],
 }: RepoCardStatusIndicatorProps) {
   const isReady = readyCount > 0;
-  const isWarming = warmingCount > 0 && readyCount === 0;
-  const isEmpty = readyCount === 0 && warmingCount === 0;
+  const isWarming = warmingCount > 0;
 
   let statusColor = "bg-gray-500";
-  let statusText = "Empty";
+  let statusText = "Pending";
   let pulseClass = "";
 
   if (isReady) {
@@ -26,11 +37,13 @@ export function RepoCardStatusIndicator({
     statusText = `${readyCount}/${poolSize} Ready`;
   } else if (isWarming) {
     statusColor = "bg-yellow-500";
-    statusText = "Warming";
+    // Get the current step from the first warming conversation
+    const warmingConv = prewarmedConversations.find(c => c.status === 'warming');
+    const stepLabel = warmingConv?.warming_step 
+      ? warmingStepLabels[warmingConv.warming_step] || warmingConv.warming_step
+      : "Warming";
+    statusText = stepLabel;
     pulseClass = "animate-pulse";
-  } else if (isEmpty) {
-    statusColor = "bg-gray-500";
-    statusText = "Pending";
   }
 
   return (

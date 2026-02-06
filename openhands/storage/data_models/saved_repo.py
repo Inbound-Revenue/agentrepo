@@ -14,6 +14,8 @@ class PrewarmedConversation:
     status: str = 'pending'  # 'pending', 'warming', 'ready', 'error'
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     error_message: str | None = None
+    # Current step in the warming process for UI feedback
+    warming_step: str | None = None  # e.g., 'initializing', 'cloning_repo', 'building_runtime', 'ready'
 
 
 @dataclass

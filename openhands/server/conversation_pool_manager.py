@@ -100,6 +100,7 @@ class ConversationPoolManager:
                     conversation_id=conv_id,
                     status='warming',
                     created_at=datetime.now(timezone.utc),
+                    warming_step='queued',
                 )
                 repo.prewarmed_conversations.append(prewarmed_conv)
                 await repos_store.update_repo(repo)
@@ -124,6 +125,11 @@ class ConversationPoolManager:
         try:
             logger.info(f'Warming conversation {conversation_id} for repo {repo_full_name}')
             
+            # Step 1: Initializing
+            await self._update_conversation_status(
+                repo_full_name, conversation_id, 'warming', warming_step='initializing'
+            )
+            
             repos_store = await self._get_repos_store()
             repo = await repos_store.get_repo(repo_full_name)
             if not repo:
@@ -133,6 +139,11 @@ class ConversationPoolManager:
             # Import here to avoid circular imports
             from openhands.server.services.conversation_service import initialize_conversation
             from openhands.storage.data_models.conversation_metadata import ConversationTrigger
+            
+            # Step 2: Creating conversation metadata
+            await self._update_conversation_status(
+                repo_full_name, conversation_id, 'warming', warming_step='creating_metadata'
+            )
             
             # Initialize the conversation metadata
             await initialize_conversation(
@@ -155,13 +166,15 @@ class ConversationPoolManager:
             # This is a future enhancement.
             
             # Update status to ready
-            await self._update_conversation_status(repo_full_name, conversation_id, 'ready')
+            await self._update_conversation_status(
+                repo_full_name, conversation_id, 'ready', warming_step='ready'
+            )
             logger.info(f'Conversation {conversation_id} is ready for repo {repo_full_name}')
             
         except Exception as e:
             logger.error(f'Error warming conversation {conversation_id}: {e}')
             await self._update_conversation_status(
-                repo_full_name, conversation_id, 'error', str(e)
+                repo_full_name, conversation_id, 'error', str(e), warming_step='error'
             )
         finally:
             # Clean up task reference
@@ -172,21 +185,25 @@ class ConversationPoolManager:
         repo_full_name: str, 
         conversation_id: str, 
         status: str,
-        error_message: str | None = None
+        error_message: str | None = None,
+        warming_step: str | None = None,
     ) -> None:
         """Update the status of a pre-warmed conversation."""
-        repos_store = await self._get_repos_store()
-        repo = await repos_store.get_repo(repo_full_name)
-        if not repo:
-            return
-        
-        for conv in repo.prewarmed_conversations:
-            if conv.conversation_id == conversation_id:
-                conv.status = status
-                conv.error_message = error_message
-                break
-        
-        await repos_store.update_repo(repo)
+        async with self._lock:
+            repos_store = await self._get_repos_store()
+            repo = await repos_store.get_repo(repo_full_name)
+            if not repo:
+                return
+            
+            for conv in repo.prewarmed_conversations:
+                if conv.conversation_id == conversation_id:
+                    conv.status = status
+                    conv.error_message = error_message
+                    if warming_step is not None:
+                        conv.warming_step = warming_step
+                    break
+            
+            await repos_store.update_repo(repo)
     
     async def claim_conversation(self, repo_full_name: str) -> str | None:
         """Claim a ready conversation from the pool for immediate use.

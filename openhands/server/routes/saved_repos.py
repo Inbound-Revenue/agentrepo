@@ -25,6 +25,7 @@ class PrewarmedConversationResponse(BaseModel):
     status: str
     created_at: str
     error_message: str | None
+    warming_step: str | None
 
 
 class SavedRepoResponse(BaseModel):
@@ -78,6 +79,7 @@ def prewarmed_conv_to_response(conv: PrewarmedConversation) -> PrewarmedConversa
         status=conv.status,
         created_at=conv.created_at.isoformat() if conv.created_at else datetime.now(timezone.utc).isoformat(),
         error_message=conv.error_message,
+        warming_step=conv.warming_step,
     )
 
 
@@ -172,6 +174,8 @@ async def add_saved_repo(
     pre-warming conversations for this repo.
     """
     try:
+        from openhands.server.conversation_pool_manager import get_pool_manager
+        
         # Validate git provider
         try:
             git_provider = ProviderType(request.git_provider)
@@ -199,8 +203,12 @@ async def add_saved_repo(
         await repos_store.add_repo(repo)
         logger.info(f'Added saved repo: {request.repo_full_name} with pool_size={request.pool_size}')
         
-        # TODO: Trigger ConversationPoolManager.prewarm_for_repo() here
-        # This will be implemented in Phase 3.2
+        # Trigger pre-warming for this repo
+        pool_manager = await get_pool_manager()
+        await pool_manager.prewarm_for_repo(request.repo_full_name)
+        
+        # Reload repo to get updated prewarmed_conversations
+        repo = await repos_store.get_repo(request.repo_full_name)
         
         return repo_to_response(repo)
     except HTTPException:

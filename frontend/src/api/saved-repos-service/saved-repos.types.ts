@@ -2,11 +2,14 @@
  * Types for the Saved Repos API
  */
 
+export type WarmingStep = 'queued' | 'initializing' | 'creating_metadata' | 'ready' | 'error';
+
 export interface PrewarmedConversation {
   conversation_id: string;
   status: 'pending' | 'warming' | 'ready' | 'error';
   created_at: string;
   error_message: string | null;
+  warming_step: WarmingStep | null;
 }
 
 export interface SavedRepository {
