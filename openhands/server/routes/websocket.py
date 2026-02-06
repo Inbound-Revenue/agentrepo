@@ -13,7 +13,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
 from openhands.core.logger import openhands_logger as logger
-from openhands.utils.import_utils import httpx_verify_option
+from openhands.utils.http_session import httpx_verify_option
 
 app = APIRouter(tags=['websocket'])
 
