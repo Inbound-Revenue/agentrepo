@@ -129,6 +129,7 @@ class ConversationPoolManager:
             await self._update_conversation_status(
                 repo_full_name, conversation_id, 'warming', warming_step='initializing'
             )
+            await asyncio.sleep(1)  # Give UI time to show progress
             
             repos_store = await self._get_repos_store()
             repo = await repos_store.get_repo(repo_full_name)
@@ -140,9 +141,21 @@ class ConversationPoolManager:
             from openhands.server.services.conversation_service import initialize_conversation
             from openhands.storage.data_models.conversation_metadata import ConversationTrigger
             
-            # Step 2: Creating conversation metadata
+            # Step 2: Cloning repo (simulated - actual cloning happens when runtime starts)
             await self._update_conversation_status(
-                repo_full_name, conversation_id, 'warming', warming_step='creating_metadata'
+                repo_full_name, conversation_id, 'warming', warming_step='cloning_repo'
+            )
+            await asyncio.sleep(2)  # Simulate repo cloning time
+            
+            # Step 3: Building runtime (simulated)
+            await self._update_conversation_status(
+                repo_full_name, conversation_id, 'warming', warming_step='building_runtime'
+            )
+            await asyncio.sleep(2)  # Simulate runtime building
+            
+            # Step 4: Starting agent
+            await self._update_conversation_status(
+                repo_full_name, conversation_id, 'warming', warming_step='starting_agent'
             )
             
             # Initialize the conversation metadata
@@ -154,6 +167,8 @@ class ConversationPoolManager:
                 conversation_trigger=ConversationTrigger.GUI,
                 git_provider=repo.git_provider if isinstance(repo.git_provider, ProviderType) else ProviderType(repo.git_provider),
             )
+            
+            await asyncio.sleep(1)  # Final setup
             
             # Note: We don't start the full agent loop here because that requires
             # user settings (API keys, etc.). The conversation is "warm" when:

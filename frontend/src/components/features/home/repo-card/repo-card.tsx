@@ -8,7 +8,7 @@ import { Link } from "react-router";
 import CodeBranchIcon from "#/icons/u-code-branch.svg?react";
 import { GitProviderIcon } from "#/components/shared/git-provider-icon";
 import { Provider } from "#/types/settings";
-import type { SavedRepository } from "#/api/saved-repos-service/saved-repos.types";
+import type { SavedRepository, PrewarmedConversation } from "#/api/saved-repos-service/saved-repos.types";
 import type { Conversation } from "#/api/open-hands.types";
 import { useClaimConversation } from "#/hooks/mutation/use-saved-repos-mutations";
 import { formatTimeDelta } from "#/utils/format-time-delta";
@@ -20,6 +20,16 @@ interface RepoCardProps {
   onRemove?: () => void;
 }
 
+const warmingStepLabels: Record<string, string> = {
+  queued: "Queued",
+  initializing: "Initializing",
+  cloning_repo: "Cloning repo",
+  building_runtime: "Building runtime",
+  starting_agent: "Starting agent",
+  ready: "Ready",
+  error: "Error",
+};
+
 export function RepoCard({ repo, conversations = [], onRemove }: RepoCardProps) {
   const claimConversation = useClaimConversation();
   const [isRemoving, setIsRemoving] = React.useState(false);
@@ -30,7 +40,6 @@ export function RepoCard({ repo, conversations = [], onRemove }: RepoCardProps) 
 
   const handleNewConversation = async () => {
     if (!hasReadyConversation) {
-      // No ready conversation - could show a message or fallback to normal flow
       console.log("No ready conversations available, please wait...");
       return;
     }
@@ -45,10 +54,13 @@ export function RepoCard({ repo, conversations = [], onRemove }: RepoCardProps) 
     }
   };
 
-  // Filter conversations for this repo
+  // Filter conversations for this repo (exclude prewarmed ones)
   const repoConversations = conversations.filter(
     (conv) => conv.selected_repository === repo.repo_full_name
   );
+
+  // Combine prewarmed conversations with recent ones for display
+  const prewarmedConvIds = new Set(repo.prewarmed_conversations.map(c => c.conversation_id));
 
   return (
     <div className="flex flex-col gap-3 p-5 rounded-xl border border-[#727987] bg-[#26282D] min-w-[280px] max-w-[340px]">
@@ -124,21 +136,29 @@ export function RepoCard({ repo, conversations = [], onRemove }: RepoCardProps) 
               : "Not Ready"}
       </button>
 
-      {/* Existing Conversations */}
-      {repoConversations.length > 0 && (
+      {/* Conversations List - shows both prewarmed and recent */}
+      {(repo.prewarmed_conversations.length > 0 || repoConversations.length > 0) && (
         <div className="flex flex-col gap-1 mt-1">
           <span className="text-xs text-[#A3A3A3] font-medium">
-            Recent ({repoConversations.length})
+            Conversations ({repo.prewarmed_conversations.length + repoConversations.length})
           </span>
-          <div className="flex flex-col gap-1 max-h-[120px] overflow-y-auto custom-scrollbar">
-            {repoConversations.slice(0, 5).map((conv) => (
+          <div className="flex flex-col gap-1 max-h-[180px] overflow-y-auto custom-scrollbar">
+            {/* Prewarmed conversations first */}
+            {repo.prewarmed_conversations.map((conv) => (
+              <PrewarmedConversationRow key={conv.conversation_id} conv={conv} />
+            ))}
+            {/* Then recent conversations (excluding any that are in prewarmed list) */}
+            {repoConversations
+              .filter(conv => !prewarmedConvIds.has(conv.conversation_id))
+              .slice(0, 5)
+              .map((conv) => (
               <Link
                 key={conv.conversation_id}
                 to={`/conversations/${conv.conversation_id}`}
                 className="flex items-center justify-between p-2 rounded hover:bg-[#3D3F45] transition-colors text-xs"
               >
                 <span className="text-white truncate max-w-[160px]">
-                  {conv.title || "Untitled"}
+                  {conv.title || `Conversation ${conv.conversation_id.slice(0, 5)}`}
                 </span>
                 {conv.created_at && (
                   <span className="text-[#A3A3A3]">
@@ -150,58 +170,64 @@ export function RepoCard({ repo, conversations = [], onRemove }: RepoCardProps) 
           </div>
         </div>
       )}
-
-      {/* Pool info - show individual conversations when warming */}
-      <div className="mt-auto">
-        {repo.prewarmed_conversations.length > 0 ? (
-          <div className="flex flex-col gap-1">
-            <span className="text-[10px] text-[#6B7280]">
-              Warming pool ({repo.ready_count}/{repo.pool_size} ready)
-            </span>
-            <div className="flex flex-wrap gap-1">
-              {repo.prewarmed_conversations.map((conv) => (
-                <WarmingConversationBadge key={conv.conversation_id} conv={conv} />
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="text-[10px] text-[#6B7280]">
-            Pool: {repo.ready_count} ready, {repo.warming_count} warming
-          </div>
-        )}
-      </div>
     </div>
   );
 }
 
-function WarmingConversationBadge({ conv }: { conv: SavedRepository['prewarmed_conversations'][number] }) {
-  const getStatusInfo = () => {
+function PrewarmedConversationRow({ conv }: { conv: PrewarmedConversation }) {
+  const getStatusDisplay = () => {
+    const step = conv.warming_step || conv.status;
+    const label = warmingStepLabels[step] || step;
+    
     switch (conv.status) {
       case 'ready':
-        return { color: 'bg-green-500', label: '✓', animate: false };
+        return { 
+          bgColor: 'bg-green-500/20', 
+          textColor: 'text-green-400', 
+          label: 'Ready',
+          icon: '✓'
+        };
       case 'warming':
-        const stepLabel = conv.warming_step === 'queued' ? '⏳' 
-          : conv.warming_step === 'initializing' ? '🔄'
-          : conv.warming_step === 'creating_metadata' ? '📝'
-          : '⚙️';
-        return { color: 'bg-yellow-500', label: stepLabel, animate: true };
+        return { 
+          bgColor: 'bg-yellow-500/20', 
+          textColor: 'text-yellow-400', 
+          label,
+          icon: null,
+          animate: true
+        };
       case 'error':
-        return { color: 'bg-red-500', label: '✗', animate: false };
+        return { 
+          bgColor: 'bg-red-500/20', 
+          textColor: 'text-red-400', 
+          label: conv.error_message || 'Error',
+          icon: '✗'
+        };
       default:
-        return { color: 'bg-gray-500', label: '○', animate: false };
+        return { 
+          bgColor: 'bg-gray-500/20', 
+          textColor: 'text-gray-400', 
+          label: 'Pending',
+          icon: null
+        };
     }
   };
 
-  const { color, label, animate } = getStatusInfo();
+  const { bgColor, textColor, label, icon, animate } = getStatusDisplay();
 
   return (
-    <div 
-      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] ${color}/20 border border-current/20`}
-      title={conv.warming_step || conv.status}
-    >
-      <span className={animate ? 'animate-spin' : ''}>{label}</span>
-      <span className="text-[#A3A3A3] truncate max-w-[60px]">
-        {conv.conversation_id.slice(0, 6)}
+    <div className="flex items-center justify-between p-2 rounded bg-[#1E1F22] text-xs">
+      <span className="text-white truncate max-w-[120px]">
+        Conversation {conv.conversation_id.slice(0, 5)}
+      </span>
+      <span 
+        className={`flex items-center gap-1 px-2 py-0.5 rounded ${bgColor} ${textColor} text-[10px] font-medium`}
+        title={conv.error_message || undefined}
+      >
+        {animate && (
+          <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
+        )}
+        {icon && <span>{icon}</span>}
+        {label}
       </span>
     </div>
   );
