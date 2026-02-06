@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from openhands.app_server.app_conversation.app_conversation_service import (
     AppConversationService,
 )
-from openhands.utils.http import httpx_verify_option
+from openhands.utils.http_session import httpx_verify_option
 from openhands.app_server.config import depends_app_conversation_service
 from openhands.core.logger import openhands_logger as logger
 from openhands.events.action.message import MessageAction
