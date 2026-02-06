@@ -8,6 +8,7 @@
 # This module belongs to the old V0 web server. The V1 application server lives under openhands/app_server/.
 import uuid
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -15,6 +16,7 @@ from pydantic import BaseModel
 from openhands.app_server.app_conversation.app_conversation_service import (
     AppConversationService,
 )
+from openhands.utils.http import httpx_verify_option
 from openhands.app_server.config import depends_app_conversation_service
 from openhands.core.logger import openhands_logger as logger
 from openhands.events.action.message import MessageAction
@@ -28,8 +30,7 @@ from openhands.server.dependencies import get_dependencies
 from openhands.server.session.conversation import ServerConversation
 from openhands.server.shared import conversation_manager, file_store
 from openhands.server.user_auth import get_user_id
-from openhands.server.utils import get_conversation, get_conversation_metadata
-from openhands.storage.data_models.conversation_metadata import ConversationMetadata
+from openhands.server.utils import get_conversation
 
 app = APIRouter(
     prefix='/api/conversations/{conversation_id}', dependencies=get_dependencies()
@@ -223,7 +224,7 @@ async def search_events(
     reverse: bool = False,
     filter: EventFilter | None = None,
     limit: int = 20,
-    metadata: ConversationMetadata = Depends(get_conversation_metadata),
+    app_conversation_service: AppConversationService = app_conversation_service_dependency,
     user_id: str | None = Depends(get_user_id),
 ):
     """Search through the event stream with filtering and pagination.
@@ -235,7 +236,7 @@ async def search_events(
         reverse: Whether to retrieve events in reverse order. Defaults to False.
         filter: Filter for events
         limit: Maximum number of events to return. Must be between 1 and 100. Defaults to 20
-        metadata: Conversation metadata (injected by dependency)
+        app_conversation_service: Service to query V1 conversations
         user_id: User ID (injected by dependency)
 
     Returns:
@@ -255,7 +256,13 @@ async def search_events(
             status_code=status.HTTP_400_BAD_REQUEST, detail='Invalid limit'
         )
 
-    # Create an event store to access the events directly
+    # Check if this is a V1 conversation - if so, proxy to SDK
+    if await _is_v1_conversation(conversation_id, app_conversation_service):
+        return await _search_events_v1(
+            conversation_id, start_id, limit, app_conversation_service
+        )
+
+    # V0 conversation - use the legacy event store
     event_store = EventStore(
         sid=conversation_id,
         file_store=file_store,
@@ -283,6 +290,77 @@ async def search_events(
         'events': events_json,
         'has_more': has_more,
     }
+
+
+async def _search_events_v1(
+    conversation_id: str,
+    start_id: int,
+    limit: int,
+    app_conversation_service: AppConversationService,
+) -> dict:
+    """Search events for a V1 conversation by proxying to the SDK agent_server.
+
+    Args:
+        conversation_id: The conversation ID
+        start_id: Starting event index
+        limit: Maximum number of events to return
+        app_conversation_service: Service to get conversation info
+
+    Returns:
+        dict: Dictionary containing events and has_more flag
+    """
+    try:
+        conversation_uuid = uuid.UUID(conversation_id)
+        app_conversation = await app_conversation_service.get_app_conversation(
+            conversation_uuid
+        )
+
+        if app_conversation is None or app_conversation.conversation_url is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f'Conversation {conversation_id} not found or not ready',
+            )
+
+        # Build SDK events search URL
+        # SDK endpoint: GET /api/conversations/{id}/events/search
+        sdk_url = f'{app_conversation.conversation_url}/events/search'
+        params = {
+            'start_index': start_id,
+            'limit': limit + 1,  # Get one extra to check has_more
+        }
+
+        headers = {}
+        if app_conversation.session_api_key:
+            headers['X-Session-API-Key'] = app_conversation.session_api_key
+
+        async with httpx.AsyncClient(verify=httpx_verify_option()) as client:
+            response = await client.get(sdk_url, params=params, headers=headers)
+            response.raise_for_status()
+            sdk_events = response.json()
+
+        # SDK returns a list of events
+        events = sdk_events if isinstance(sdk_events, list) else []
+        has_more = len(events) > limit
+        if has_more:
+            events = events[:limit]
+
+        return {
+            'events': events,
+            'has_more': has_more,
+        }
+
+    except httpx.HTTPStatusError as e:
+        logger.error(f'SDK events request failed: {e}')
+        raise HTTPException(
+            status_code=e.response.status_code,
+            detail=f'Failed to fetch events from SDK: {e}',
+        )
+    except Exception as e:
+        logger.error(f'Error fetching V1 events: {e}')
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f'Error fetching events: {e}',
+        )
 
 
 @app.post('/events', deprecated=True)
