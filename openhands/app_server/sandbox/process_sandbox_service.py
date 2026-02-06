@@ -115,7 +115,11 @@ class ProcessSandboxService(SandboxService):
         # Prepare environment variables
         env = os.environ.copy()
         env.update(sandbox_spec.initial_env)
+        # Set both V0 and V1 session API key env vars for compatibility
+        # The SDK's agent_server prefers OH_SESSION_API_KEYS_0 (V1) over
+        # SESSION_API_KEY (V0), so we must set both to ensure auth works
         env['SESSION_API_KEY'] = session_api_key
+        env['OH_SESSION_API_KEYS_0'] = session_api_key
 
         # Prepare command arguments
         cmd = [
