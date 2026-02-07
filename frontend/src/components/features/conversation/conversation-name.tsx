@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useActiveConversation } from "#/hooks/query/use-active-conversation";
 import { useUpdateConversation } from "#/hooks/mutation/use-update-conversation";
 import { useConversationNameContextMenu } from "#/hooks/use-conversation-name-context-menu";
+import { useUnifiedActiveHost } from "#/hooks/query/use-unified-active-host";
 import { displaySuccessToast } from "#/utils/custom-toast-handlers";
 import { I18nKey } from "#/i18n/declaration";
 import { EllipsisButton } from "../conversation-panel/ellipsis-button";
@@ -20,6 +21,7 @@ export function ConversationName() {
   const { conversationId } = useParams<{ conversationId: string }>();
   const { data: conversation } = useActiveConversation();
   const { mutate: updateConversation } = useUpdateConversation();
+  const { activeHost, isLoading: isLoadingHost } = useUnifiedActiveHost();
 
   const [titleMode, setTitleMode] = React.useState<"view" | "edit">("view");
   const [contextMenuOpen, setContextMenuOpen] = React.useState(false);
@@ -162,6 +164,30 @@ export function ConversationName() {
           <ConversationVersionBadge
             version={conversation.conversation_version}
           />
+        )}
+
+        {/* Preview Button - shows when there's an active host */}
+        {titleMode !== "edit" && activeHost && (
+          <a
+            href={activeHost}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-1 px-2 py-1 text-xs font-medium text-white bg-[#4D6DFF] hover:bg-[#5C7CFF] rounded transition-colors"
+          >
+            <svg 
+              width="12" 
+              height="12" 
+              viewBox="0 0 24 24" 
+              fill="none" 
+              stroke="currentColor" 
+              strokeWidth="2"
+            >
+              <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+              <polyline points="15 3 21 3 21 9" />
+              <line x1="10" y1="14" x2="21" y2="3" />
+            </svg>
+            Preview
+          </a>
         )}
 
         {titleMode !== "edit" && (
