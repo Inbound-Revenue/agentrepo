@@ -118,8 +118,8 @@ app.include_router(conversation_api_router)
 app.include_router(manage_conversation_api_router)
 app.include_router(settings_router)
 app.include_router(secrets_router)
+app.include_router(repo_ideas_router)  # Must be before saved_repos_router for /ideas routes
 app.include_router(saved_repos_router)
-app.include_router(repo_ideas_router)
 app.include_router(github_webhook_router)
 if server_config.app_mode == AppMode.OPENHANDS:
     app.include_router(git_api_router)
