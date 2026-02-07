@@ -7,40 +7,42 @@
 # - The V1 sandbox automatically maps these to external ports
 # - To find the external URLs, call: GET /api/v1/sandboxes/search
 #   Then look for exposed_urls with names "WORKER_1" and "WORKER_2"
+#
+# NOTE: The repo is cloned to /workspace/agentrepo (not /workspace/project/agentrepo)
 
 autostart:
   enabled: true
   commands:
     # 1. Install Python dependencies
     - name: "Install Python deps"
-      command: "cd /workspace/project/agentrepo && poetry install --no-interaction"
+      command: "cd /workspace/agentrepo && poetry install --no-interaction"
       background: false
       timeout: 300
 
     # 2. Install Frontend dependencies
     - name: "Install Frontend deps"
-      command: "cd /workspace/project/agentrepo/frontend && npm install"
+      command: "cd /workspace/agentrepo/frontend && npm install"
       background: false
       timeout: 300
 
     # 3. Build Frontend (required for backend to start)
     - name: "Build Frontend"
-      command: "cd /workspace/project/agentrepo/frontend && npm run build"
+      command: "cd /workspace/agentrepo/frontend && npm run build"
       background: false
       timeout: 300
 
     # 4. Install Playwright browsers (required for browser functionality)
     - name: "Install Playwright"
-      command: "cd /workspace/project/agentrepo && PLAYWRIGHT_BROWSERS_PATH=/home/openhands/.cache/playwright poetry run playwright install chromium"
+      command: "cd /workspace/agentrepo && PLAYWRIGHT_BROWSERS_PATH=/home/openhands/.cache/playwright poetry run playwright install chromium"
       background: false
       timeout: 300
 
     # 5. Start Backend on port 8011 (maps to WORKER_1 externally)
     - name: "Start Backend"
-      command: "cd /workspace/project/agentrepo && RUNTIME=local poetry run uvicorn openhands.server.listen:app --host 0.0.0.0 --port 8011"
+      command: "cd /workspace/agentrepo && RUNTIME=local poetry run uvicorn openhands.server.listen:app --host 0.0.0.0 --port 8011"
       background: true
 
     # 6. Start Frontend dev server on port 8012 (maps to WORKER_2 externally)
     - name: "Start Frontend Dev"
-      command: "cd /workspace/project/agentrepo/frontend && VITE_BACKEND_HOST=0.0.0.0:8011 npm run dev -- --port 8012 --host 0.0.0.0"
+      command: "cd /workspace/agentrepo/frontend && VITE_BACKEND_HOST=0.0.0.0:8011 npm run dev -- --port 8012 --host 0.0.0.0"
       background: true
