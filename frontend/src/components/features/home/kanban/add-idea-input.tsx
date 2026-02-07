@@ -41,11 +41,25 @@ export function AddIdeaInput({ repoFullName }: AddIdeaInputProps) {
     }
   };
 
+  const handleSubmit = () => {
+    const trimmedText = text.trim();
+    if (trimmedText) {
+      createIdea.mutate(
+        { text: trimmedText },
+        {
+          onSuccess: () => {
+            setText("");
+          },
+        },
+      );
+    }
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    // Submit on Cmd/Ctrl + Enter
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+    // Shift+Enter for new line, Enter to submit
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      handleBlur();
+      handleSubmit();
     }
   };
 

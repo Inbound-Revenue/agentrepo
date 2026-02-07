@@ -32,6 +32,7 @@ export function IdeasColumn({ repoFullName, ideas }: IdeasColumnProps) {
       <h3 className="text-white font-medium mb-4 text-sm">Ideas & Issues</h3>
 
       <SortableContext
+        id={`ideas-${repoFullName}`}
         items={ideas.map((i) => i.id)}
         strategy={verticalListSortingStrategy}
       >

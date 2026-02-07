@@ -146,16 +146,14 @@ export function KanbanBoard({ onAddRepo }: KanbanBoardProps) {
     const { active } = event;
     setActiveId(active.id as string);
 
-    // Find which repo this idea belongs to by checking the data
+    // Find which repo this idea belongs to by checking the sortable data
     const activeData = active.data.current;
     if (activeData?.sortable?.containerId) {
-      // The containerId is like "ideas-Inbound-Revenue/agentrepo"
       const containerId = activeData.sortable.containerId as string;
       if (containerId.startsWith("ideas-")) {
         setActiveRepoName(containerId.replace("ideas-", ""));
       }
     } else if (savedRepos.length > 0) {
-      // Fallback: set the first repo
       setActiveRepoName(savedRepos[0].repo_full_name);
     }
   }, [savedRepos]);
@@ -163,34 +161,43 @@ export function KanbanBoard({ onAddRepo }: KanbanBoardProps) {
   const handleDragEnd = React.useCallback((event: DragEndEvent) => {
     const { active, over } = event;
 
-    const currentActiveId = activeId;
-    const currentActiveRepoName = activeRepoName;
-    
     setActiveId(null);
     setActiveRepoName(null);
 
-    if (!over || !currentActiveRepoName) return;
+    if (!over) return;
 
     const activeIdStr = active.id as string;
     const overIdStr = over.id as string;
 
+    // Get the repo name from the active item's sortable data
+    const activeData = active.data.current;
+    let repoFullName: string | null = null;
+    
+    if (activeData?.sortable?.containerId) {
+      const containerId = activeData.sortable.containerId as string;
+      if (containerId.startsWith("ideas-")) {
+        repoFullName = containerId.replace("ideas-", "");
+      }
+    }
+
+    if (!repoFullName) return;
+
     // Check if dropped on a "Building" column
     if (overIdStr.startsWith("building-")) {
-      handleBuildIdea(currentActiveRepoName, activeIdStr);
+      handleBuildIdea(repoFullName, activeIdStr);
       return;
     }
 
     // Handle reordering within Ideas column
     if (activeIdStr !== overIdStr) {
-      // Get current ideas from cache
-      const ideas = queryClient.getQueryData<RepoIdea[]>(["repo-ideas", currentActiveRepoName]);
+      const ideas = queryClient.getQueryData<RepoIdea[]>(["repo-ideas", repoFullName]);
       if (ideas) {
         // Only reorder ideas that are NOT building (in the ideas column)
         const ideasOnly = ideas.filter((i) => !i.building_conversation_id);
         const oldIndex = ideasOnly.findIndex((i) => i.id === activeIdStr);
         const newIndex = ideasOnly.findIndex((i) => i.id === overIdStr);
         
-        if (oldIndex !== -1 && newIndex !== -1) {
+        if (oldIndex !== -1 && newIndex !== -1 && oldIndex !== newIndex) {
           const reorderedIdeas = arrayMove(ideasOnly, oldIndex, newIndex);
           const newOrder = reorderedIdeas.map((i) => i.id);
           
@@ -201,16 +208,16 @@ export function KanbanBoard({ onAddRepo }: KanbanBoardProps) {
             order: index,
           }));
           queryClient.setQueryData(
-            ["repo-ideas", currentActiveRepoName],
+            ["repo-ideas", repoFullName],
             [...updatedIdeasOnly, ...buildingIdeas]
           );
           
           // Trigger the reorder mutation
-          handleReorderIdeas(currentActiveRepoName, newOrder);
+          handleReorderIdeas(repoFullName, newOrder);
         }
       }
     }
-  }, [activeId, activeRepoName, handleBuildIdea, handleReorderIdeas, queryClient]);
+  }, [handleBuildIdea, handleReorderIdeas, queryClient]);
 
   const handleRemoveRepo = (repoFullName: string) => {
     removeSavedRepo.mutate(repoFullName);

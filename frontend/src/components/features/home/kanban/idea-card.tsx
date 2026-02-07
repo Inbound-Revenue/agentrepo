@@ -76,7 +76,9 @@ export function IdeaCard({ idea, repoFullName }: IdeaCardProps) {
     if (e.key === "Escape") {
       setText(idea.text);
       setIsEditing(false);
-    } else if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+    } else if (e.key === "Enter" && !e.shiftKey) {
+      // Enter to save, Shift+Enter for newline
+      e.preventDefault();
       handleSave();
     }
   };
