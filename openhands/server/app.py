@@ -38,6 +38,7 @@ from openhands.server.routes.manage_conversations import (
 )
 from openhands.server.routes.mcp import mcp_server
 from openhands.server.routes.public import app as public_api_router
+from openhands.server.routes.repo_ideas import app as repo_ideas_router
 from openhands.server.routes.saved_repos import app as saved_repos_router
 from openhands.server.routes.secrets import app as secrets_router
 from openhands.server.routes.security import app as security_api_router
@@ -118,6 +119,7 @@ app.include_router(manage_conversation_api_router)
 app.include_router(settings_router)
 app.include_router(secrets_router)
 app.include_router(saved_repos_router)
+app.include_router(repo_ideas_router)
 app.include_router(github_webhook_router)
 if server_config.app_mode == AppMode.OPENHANDS:
     app.include_router(git_api_router)
