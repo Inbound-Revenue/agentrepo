@@ -83,18 +83,21 @@ export function IdeaCard({ idea, repoFullName }: IdeaCardProps) {
     }
   };
 
+  // Disable drag listeners when editing to allow typing spaces
+  const dragListeners = isEditing ? {} : listeners;
+
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className={`bg-[#26282D] rounded-lg p-3 cursor-grab active:cursor-grabbing transition-all ${
+      className={`bg-[#26282D] rounded-lg p-3 transition-all ${
         isDragging ? "opacity-50 shadow-lg scale-105" : ""
-      } ${isEditing ? "ring-1 ring-[#525664]" : ""}`}
+      } ${isEditing ? "ring-1 ring-[#525664]" : "cursor-grab active:cursor-grabbing"}`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       /* eslint-disable react/jsx-props-no-spreading */
       {...attributes}
-      {...listeners}
+      {...dragListeners}
       /* eslint-enable react/jsx-props-no-spreading */
     >
       <div className="flex items-start gap-2">
