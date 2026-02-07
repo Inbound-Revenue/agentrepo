@@ -12,7 +12,6 @@ import type { SavedRepository, PrewarmedConversation } from "#/api/saved-repos-s
 import type { Conversation } from "#/api/open-hands.types";
 import { useClaimConversation } from "#/hooks/mutation/use-saved-repos-mutations";
 import { formatTimeDelta } from "#/utils/format-time-delta";
-import { RepoCardStatusIndicator } from "./repo-card-status-indicator";
 
 interface RepoCardProps {
   repo: SavedRepository;
@@ -36,14 +35,8 @@ export function RepoCard({ repo, conversations = [], onRemove }: RepoCardProps) 
   const [isRemoving, setIsRemoving] = React.useState(false);
 
   const repoName = repo.repo_full_name.split("/").pop() || repo.repo_full_name;
-  const hasReadyConversation = repo.ready_count > 0;
-  const isWarming = repo.warming_count > 0 && repo.ready_count === 0;
 
-  const handleNewConversation = async () => {
-    if (!hasReadyConversation) {
-      console.log("No ready conversations available, please wait...");
-      return;
-    }
+  const handleClaimConversation = async () => {
     claimConversation.mutate(repo.repo_full_name);
   };
 
@@ -86,14 +79,8 @@ export function RepoCard({ repo, conversations = [], onRemove }: RepoCardProps) 
           </div>
         </div>
         
-        {/* Status + Remove */}
+        {/* Remove button */}
         <div className="flex items-center gap-2">
-          <RepoCardStatusIndicator
-            readyCount={repo.ready_count}
-            warmingCount={repo.warming_count}
-            poolSize={repo.pool_size}
-            prewarmedConversations={repo.prewarmed_conversations}
-          />
           {onRemove && (
             <button
               onClick={handleRemove}
@@ -116,37 +103,21 @@ export function RepoCard({ repo, conversations = [], onRemove }: RepoCardProps) 
         </div>
       </div>
 
-      {/* New Conversation Button */}
-      <button
-        onClick={handleNewConversation}
-        disabled={!hasReadyConversation || claimConversation.isPending}
-        className={`w-full py-2 px-4 rounded-lg font-medium text-sm transition-all ${
-          hasReadyConversation
-            ? "bg-[#4D6DFF] hover:bg-[#5C7CFF] text-white cursor-pointer"
-            : isWarming
-              ? "bg-[#3D3F45] text-[#A3A3A3] cursor-wait"
-              : "bg-[#3D3F45] text-[#A3A3A3] cursor-not-allowed"
-        }`}
-      >
-        {claimConversation.isPending
-          ? "Opening..."
-          : isWarming
-            ? "Warming up..."
-            : hasReadyConversation
-              ? "New Conversation"
-              : "Not Ready"}
-      </button>
-
       {/* Conversations List - shows both prewarmed and recent */}
       {(repo.prewarmed_conversations.length > 0 || repoConversations.length > 0) && (
-        <div className="flex flex-col gap-1 mt-1">
+        <div className="flex flex-col gap-1">
           <span className="text-xs text-[#A3A3A3] font-medium">
             Conversations ({repo.prewarmed_conversations.length + repoConversations.length})
           </span>
           <div className="flex flex-col gap-1 max-h-[180px] overflow-y-auto custom-scrollbar">
-            {/* Prewarmed conversations first */}
+            {/* Prewarmed conversations first - clickable if ready */}
             {repo.prewarmed_conversations.map((conv) => (
-              <PrewarmedConversationRow key={conv.conversation_id} conv={conv} />
+              <PrewarmedConversationRow 
+                key={conv.conversation_id} 
+                conv={conv} 
+                onClaim={handleClaimConversation}
+                isClaiming={claimConversation.isPending}
+              />
             ))}
             {/* Then recent conversations (excluding any that are in prewarmed list) */}
             {repoConversations
@@ -175,7 +146,15 @@ export function RepoCard({ repo, conversations = [], onRemove }: RepoCardProps) 
   );
 }
 
-function PrewarmedConversationRow({ conv }: { conv: PrewarmedConversation }) {
+function PrewarmedConversationRow({ 
+  conv, 
+  onClaim,
+  isClaiming 
+}: { 
+  conv: PrewarmedConversation;
+  onClaim: () => void;
+  isClaiming: boolean;
+}) {
   const getStatusDisplay = () => {
     const step = conv.warming_step || conv.status;
     const label = warmingStepLabels[step] || step;
@@ -186,7 +165,8 @@ function PrewarmedConversationRow({ conv }: { conv: PrewarmedConversation }) {
           bgColor: 'bg-green-500/20', 
           textColor: 'text-green-400', 
           label: 'Ready',
-          icon: '✓'
+          icon: '✓',
+          clickable: true
         };
       case 'warming':
         return { 
@@ -194,29 +174,44 @@ function PrewarmedConversationRow({ conv }: { conv: PrewarmedConversation }) {
           textColor: 'text-yellow-400', 
           label,
           icon: null,
-          animate: true
+          animate: true,
+          clickable: false
         };
       case 'error':
         return { 
           bgColor: 'bg-red-500/20', 
           textColor: 'text-red-400', 
           label: conv.error_message || 'Error',
-          icon: '✗'
+          icon: '✗',
+          clickable: false
         };
       default:
         return { 
           bgColor: 'bg-gray-500/20', 
           textColor: 'text-gray-400', 
           label: 'Pending',
-          icon: null
+          icon: null,
+          clickable: false
         };
     }
   };
 
-  const { bgColor, textColor, label, icon, animate } = getStatusDisplay();
+  const { bgColor, textColor, label, icon, animate, clickable } = getStatusDisplay();
+
+  const handleClick = () => {
+    if (clickable && !isClaiming) {
+      onClaim();
+    }
+  };
 
   return (
-    <div className="flex items-center justify-between p-2 rounded bg-[#1E1F22] text-xs">
+    <div 
+      className={`flex items-center justify-between p-2 rounded bg-[#1E1F22] text-xs ${
+        clickable ? 'cursor-pointer hover:bg-[#2A2B2F] transition-colors' : ''
+      }`}
+      onClick={handleClick}
+      role={clickable ? 'button' : undefined}
+    >
       <span className="text-white truncate max-w-[120px]">
         Conversation {conv.conversation_id.slice(0, 5)}
       </span>
@@ -228,7 +223,7 @@ function PrewarmedConversationRow({ conv }: { conv: PrewarmedConversation }) {
           <span className="inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full animate-spin" />
         )}
         {icon && <span>{icon}</span>}
-        {label}
+        {isClaiming && clickable ? 'Opening...' : label}
       </span>
     </div>
   );
