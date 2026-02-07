@@ -14,13 +14,15 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { sortableKeyboardCoordinates } from "@dnd-kit/sortable";
+import { sortableKeyboardCoordinates, arrayMove } from "@dnd-kit/sortable";
 import { useSavedRepos } from "#/hooks/query/use-saved-repos";
 import { useRepoIdeas } from "#/hooks/query/use-repo-ideas";
-import { useBuildIdea } from "#/hooks/mutation/use-repo-ideas-mutations";
+import { useBuildIdea, useReorderIdeas } from "#/hooks/mutation/use-repo-ideas-mutations";
 import { RepoColumns } from "./repo-columns";
 import { AddRepoCard } from "#/components/features/home/repo-card";
 import { useRemoveSavedRepo } from "#/hooks/mutation/use-saved-repos-mutations";
+import { useQueryClient } from "@tanstack/react-query";
+import type { RepoIdea } from "#/api/repo-ideas-service";
 
 interface KanbanBoardProps {
   onAddRepo: () => void;
@@ -53,6 +55,33 @@ function BuildIdeaMutationWrapper({ repoFullName }: { repoFullName: string }) {
   return null;
 }
 
+interface ReorderIdeasEvent extends CustomEvent {
+  detail: { repoFullName: string; ideaIds: string[] };
+}
+
+/**
+ * Wrapper component to handle reorder mutations per repo
+ */
+function ReorderMutationWrapper({ repoFullName }: { repoFullName: string }) {
+  const reorderIdeas = useReorderIdeas(repoFullName);
+
+  React.useEffect(() => {
+    const handleReorderEvent = (event: Event) => {
+      const customEvent = event as ReorderIdeasEvent;
+      if (customEvent.detail.repoFullName === repoFullName) {
+        reorderIdeas.mutate({ idea_ids: customEvent.detail.ideaIds });
+      }
+    };
+
+    window.addEventListener("reorder-ideas", handleReorderEvent);
+    return () => {
+      window.removeEventListener("reorder-ideas", handleReorderEvent);
+    };
+  }, [repoFullName, reorderIdeas]);
+
+  return null;
+}
+
 /**
  * Content for the drag overlay
  */
@@ -80,6 +109,7 @@ function DragOverlayContent({
 export function KanbanBoard({ onAddRepo }: KanbanBoardProps) {
   const { data: savedRepos = [], isLoading: isLoadingRepos } = useSavedRepos();
   const removeSavedRepo = useRemoveSavedRepo();
+  const queryClient = useQueryClient();
   const [activeId, setActiveId] = React.useState<string | null>(null);
   const [activeRepoName, setActiveRepoName] = React.useState<string | null>(null);
 
@@ -104,13 +134,28 @@ export function KanbanBoard({ onAddRepo }: KanbanBoardProps) {
     window.dispatchEvent(event);
   }, []);
 
+  const handleReorderIdeas = React.useCallback((repoFullName: string, ideaIds: string[]) => {
+    // Dispatch event to trigger reorder mutation
+    const event = new CustomEvent("reorder-ideas", {
+      detail: { repoFullName, ideaIds },
+    });
+    window.dispatchEvent(event);
+  }, []);
+
   const handleDragStart = React.useCallback((event: DragStartEvent) => {
     const { active } = event;
     setActiveId(active.id as string);
 
-    // Find which repo this idea belongs to
-    // For now, set the first repo - the overlay will find the correct one
-    if (savedRepos.length > 0) {
+    // Find which repo this idea belongs to by checking the data
+    const activeData = active.data.current;
+    if (activeData?.sortable?.containerId) {
+      // The containerId is like "ideas-Inbound-Revenue/agentrepo"
+      const containerId = activeData.sortable.containerId as string;
+      if (containerId.startsWith("ideas-")) {
+        setActiveRepoName(containerId.replace("ideas-", ""));
+      }
+    } else if (savedRepos.length > 0) {
+      // Fallback: set the first repo
       setActiveRepoName(savedRepos[0].repo_full_name);
     }
   }, [savedRepos]);
@@ -118,30 +163,54 @@ export function KanbanBoard({ onAddRepo }: KanbanBoardProps) {
   const handleDragEnd = React.useCallback((event: DragEndEvent) => {
     const { active, over } = event;
 
+    const currentActiveId = activeId;
+    const currentActiveRepoName = activeRepoName;
+    
     setActiveId(null);
     setActiveRepoName(null);
 
-    if (!over) return;
+    if (!over || !currentActiveRepoName) return;
 
     const activeIdStr = active.id as string;
     const overIdStr = over.id as string;
 
     // Check if dropped on a "Building" column
     if (overIdStr.startsWith("building-")) {
-      // Find the idea's original repo (it might be different from drop target)
-      // For now, we only support dragging within the same repo
-      for (const repo of savedRepos) {
-        if (activeRepoName === repo.repo_full_name) {
-          // Trigger the build
-          handleBuildIdea(repo.repo_full_name, activeIdStr);
-          break;
-        }
-      }
+      handleBuildIdea(currentActiveRepoName, activeIdStr);
+      return;
     }
 
     // Handle reordering within Ideas column
-    // (Would need more complex logic for cross-repo or cross-column reordering)
-  }, [savedRepos, activeRepoName, handleBuildIdea]);
+    if (activeIdStr !== overIdStr) {
+      // Get current ideas from cache
+      const ideas = queryClient.getQueryData<RepoIdea[]>(["repo-ideas", currentActiveRepoName]);
+      if (ideas) {
+        // Only reorder ideas that are NOT building (in the ideas column)
+        const ideasOnly = ideas.filter((i) => !i.building_conversation_id);
+        const oldIndex = ideasOnly.findIndex((i) => i.id === activeIdStr);
+        const newIndex = ideasOnly.findIndex((i) => i.id === overIdStr);
+        
+        if (oldIndex !== -1 && newIndex !== -1) {
+          const reorderedIdeas = arrayMove(ideasOnly, oldIndex, newIndex);
+          const newOrder = reorderedIdeas.map((i) => i.id);
+          
+          // Optimistically update the cache
+          const buildingIdeas = ideas.filter((i) => i.building_conversation_id);
+          const updatedIdeasOnly = reorderedIdeas.map((idea, index) => ({
+            ...idea,
+            order: index,
+          }));
+          queryClient.setQueryData(
+            ["repo-ideas", currentActiveRepoName],
+            [...updatedIdeasOnly, ...buildingIdeas]
+          );
+          
+          // Trigger the reorder mutation
+          handleReorderIdeas(currentActiveRepoName, newOrder);
+        }
+      }
+    }
+  }, [activeId, activeRepoName, handleBuildIdea, handleReorderIdeas, queryClient]);
 
   const handleRemoveRepo = (repoFullName: string) => {
     removeSavedRepo.mutate(repoFullName);
@@ -174,6 +243,7 @@ export function KanbanBoard({ onAddRepo }: KanbanBoardProps) {
         {savedRepos.map((repo) => (
           <React.Fragment key={repo.repo_full_name}>
             <BuildIdeaMutationWrapper repoFullName={repo.repo_full_name} />
+            <ReorderMutationWrapper repoFullName={repo.repo_full_name} />
             <RepoColumns
               repo={repo}
               onRemove={() => handleRemoveRepo(repo.repo_full_name)}
